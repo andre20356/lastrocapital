@@ -15,7 +15,6 @@ ARG VITE_CLERK_PUBLISHABLE_KEY
 ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
 COPY lib/ ./lib/
 COPY artifacts/lastrocapital/ ./artifacts/lastrocapital/
-COPY attached_assets/ ./attached_assets/
 RUN pnpm --filter @workspace/api-zod run build 2>/dev/null || true
 RUN pnpm --filter @workspace/api-client-react run build 2>/dev/null || true
 RUN PORT=3000 BASE_PATH=/ pnpm --filter @workspace/lastrocapital run build
