@@ -1,0 +1,26 @@
+FROM node:24-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY lib/db/package.json ./lib/db/
+COPY lib/api-spec/package.json ./lib/api-spec/
+COPY lib/api-zod/package.json ./lib/api-zod/
+COPY lib/api-client-react/package.json ./lib/api-client-react/
+COPY artifacts/api-server/package.json ./artifacts/api-server/
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+FROM deps AS builder
+COPY lib/ ./lib/
+COPY artifacts/api-server/ ./artifacts/api-server/
+RUN pnpm --filter @workspace/db run build 2>/dev/null || true
+RUN pnpm --filter @workspace/api-zod run build 2>/dev/null || true
+RUN pnpm --filter @workspace/api-server run build
+
+FROM node:24-alpine AS runner
+WORKDIR /app
+COPY --from=builder /app/artifacts/api-server/dist ./dist
+COPY --from=builder /app/artifacts/api-server/package.json ./package.json
+EXPOSE 8080
+CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
