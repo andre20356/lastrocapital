@@ -12,6 +12,7 @@ COPY artifacts/api-server/package.json ./artifacts/api-server/
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 FROM deps AS builder
+COPY tsconfig.base.json tsconfig.json ./
 COPY lib/ ./lib/
 COPY artifacts/api-server/ ./artifacts/api-server/
 RUN pnpm --filter @workspace/db run build 2>/dev/null || true
