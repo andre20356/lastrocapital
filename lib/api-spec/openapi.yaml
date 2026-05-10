@@ -1,0 +1,967 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: LastroCapital API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: companies
+    description: Company registration
+  - name: clients
+    description: Client management
+  - name: cashflow
+    description: Cash flow management
+  - name: invoices
+    description: Invoice management
+  - name: debts
+    description: Debt control
+  - name: dashboard
+    description: Dashboard summaries
+  - name: invite
+    description: Public invite endpoints
+  - name: subscriptions
+    description: Subscription management
+  - name: webhooks
+    description: Payment gateway webhooks
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /companies/register:
+    post:
+      operationId: registerCompany
+      tags: [companies]
+      summary: Register a new company for the authenticated user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInput"
+      responses:
+        "201":
+          description: Company registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+
+  /companies/me:
+    get:
+      operationId: getMyCompany
+      tags: [companies]
+      summary: Get current user's company
+      responses:
+        "200":
+          description: Company details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "404":
+          description: Company not found
+
+  /clients:
+    get:
+      operationId: listClients
+      tags: [clients]
+      summary: List all clients for the company
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, all]
+      responses:
+        "200":
+          description: List of clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Client"
+    post:
+      operationId: createClient
+      tags: [clients]
+      summary: Create a new client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientInput"
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+
+  /clients/{id}:
+    get:
+      operationId: getClient
+      tags: [clients]
+      summary: Get a client by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Client details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          description: Client not found
+    patch:
+      operationId: updateClient
+      tags: [clients]
+      summary: Update a client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdate"
+      responses:
+        "200":
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          description: Client not found
+    delete:
+      operationId: deleteClient
+      tags: [clients]
+      summary: Delete a client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Client deleted
+
+  /clients/public-create:
+    post:
+      operationId: publicCreateClient
+      tags: [invite]
+      summary: Public client self-registration (no auth required)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicClientInput"
+      responses:
+        "201":
+          description: Client registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          description: Company not found
+
+  /invite/{companyId}:
+    get:
+      operationId: getInviteInfo
+      tags: [invite]
+      summary: Get public company info for invite page
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Company invite info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteInfo"
+        "404":
+          description: Company not found
+
+  /cashflow:
+    get:
+      operationId: listCashFlow
+      tags: [cashflow]
+      summary: List cash flow entries
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [income, expense, all]
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of cash flow entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CashFlowEntry"
+    post:
+      operationId: createCashFlowEntry
+      tags: [cashflow]
+      summary: Create a cash flow entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CashFlowInput"
+      responses:
+        "201":
+          description: Cash flow entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashFlowEntry"
+
+  /cashflow/{id}:
+    get:
+      operationId: getCashFlowEntry
+      tags: [cashflow]
+      summary: Get a cash flow entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cash flow entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashFlowEntry"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteCashFlowEntry
+      tags: [cashflow]
+      summary: Delete a cash flow entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /cashflow/by-category:
+    get:
+      operationId: getCashFlowByCategory
+      tags: [cashflow]
+      summary: Get cash flow grouped by category
+      responses:
+        "200":
+          description: Cash flow summary by category
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CashFlowCategorySummary"
+
+  /invoices:
+    get:
+      operationId: listInvoices
+      tags: [invoices]
+      summary: List all invoices
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, paid, overdue, requested, all]
+        - name: clientId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Invoice"
+    post:
+      operationId: createInvoice
+      tags: [invoices]
+      summary: Create an invoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceInput"
+      responses:
+        "201":
+          description: Invoice created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /invoices/{id}:
+    get:
+      operationId: getInvoice
+      tags: [invoices]
+      summary: Get an invoice by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateInvoice
+      tags: [invoices]
+      summary: Update an invoice (e.g. mark as paid)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceUpdate"
+      responses:
+        "200":
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteInvoice
+      tags: [invoices]
+      summary: Delete an invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /debts:
+    get:
+      operationId: listDebts
+      tags: [debts]
+      summary: List all debts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+      responses:
+        "200":
+          description: List of debts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Debt"
+
+  /debts/{id}:
+    patch:
+      operationId: updateDebt
+      tags: [debts]
+      summary: Update debt status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DebtUpdate"
+      responses:
+        "200":
+          description: Debt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Debt"
+        "404":
+          description: Not found
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get aggregated dashboard metrics
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /subscriptions/me:
+    get:
+      operationId: getMySubscription
+      tags: [subscriptions]
+      summary: Get current company subscription
+      responses:
+        "200":
+          description: Current subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        "404":
+          description: No active subscription
+
+  /subscriptions/start-trial:
+    post:
+      operationId: startFreeTrial
+      tags: [subscriptions]
+      summary: Activate free 15-day trial (no payment required)
+      responses:
+        "201":
+          description: Trial activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        "409":
+          description: Subscription already exists
+
+  /subscriptions/create-checkout:
+    post:
+      operationId: createSubscription
+      tags: [subscriptions]
+      summary: Create a paid subscription checkout via AbacatePay
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriptionCreateInput"
+      responses:
+        "201":
+          description: Subscription created with checkout URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionCreateResult"
+        "400":
+          description: Invalid plan
+
+  /webhooks/abacatepay:
+    post:
+      operationId: abacatePayWebhook
+      tags: [webhooks]
+      summary: AbacatePay webhook receiver (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "200":
+          description: Webhook processed
+
+  /dashboard/cashflow-daily:
+    get:
+      operationId: getDashboardCashflowDaily
+      tags: [dashboard]
+      summary: Get daily cashflow data for charts
+      responses:
+        "200":
+          description: Daily cashflow data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardCashflowDay"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    Company:
+      type: object
+      required: [id, name, plan, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        cnpj:
+          type: ["string", "null"]
+          description: CNPJ ou CPF da empresa (somente números)
+        plan:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CompanyInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        cnpj:
+          type: string
+          description: CNPJ ou CPF da empresa (somente números, opcional)
+        plan:
+          type: string
+
+    InviteInfo:
+      type: object
+      required: [companyId, companyName]
+      properties:
+        companyId:
+          type: integer
+        companyName:
+          type: string
+
+    PublicClientInput:
+      type: object
+      required: [companyId, name]
+      properties:
+        companyId:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+        phone:
+          type: string
+        email:
+          type: string
+
+    Client:
+      type: object
+      required: [id, companyId, name, status, createdAt]
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        document:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [active, inactive]
+        referralSource:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    ClientInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        phone:
+          type: string
+        email:
+          type: string
+        document:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        referralSource:
+          type: string
+
+    ClientUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        phone:
+          type: string
+        email:
+          type: string
+        document:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        referralSource:
+          type: string
+
+    CashFlowEntry:
+      type: object
+      required: [id, companyId, type, amount, date, createdAt]
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+        description:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        date:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    CashFlowInput:
+      type: object
+      required: [type, amount]
+      properties:
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+          minimum: 0.01
+        description:
+          type: string
+        category:
+          type: string
+        date:
+          type: string
+          format: date-time
+
+    CashFlowCategorySummary:
+      type: object
+      required: [category, type, total]
+      properties:
+        category:
+          type: ["string", "null"]
+        type:
+          type: string
+          enum: [income, expense]
+        total:
+          type: number
+
+    Invoice:
+      type: object
+      required: [id, companyId, clientId, status, createdAt]
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        clientId:
+          type: integer
+        clientName:
+          type: ["string", "null"]
+        amount:
+          type: ["number", "null"]
+        interestRate:
+          type: ["number", "null"]
+          description: Taxa de juros em % sobre o valor principal
+        lateFee:
+          type: ["number", "null"]
+          description: Multa por dia de atraso em R$
+        daysLate:
+          type: ["integer", "null"]
+          description: Número de dias de atraso
+        interestPaid:
+          type: ["boolean", "null"]
+          description: Indica se os juros e multa já foram pagos separadamente
+        totalDue:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [pending, paid, overdue, requested]
+        dueDate:
+          type: ["string", "null"]
+          format: date
+        recurrence:
+          type: ["string", "null"]
+          enum: [weekly, biweekly, monthly, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    InvoiceInput:
+      type: object
+      required: [clientId]
+      properties:
+        clientId:
+          type: integer
+        amount:
+          type: number
+          minimum: 0
+        dueDate:
+          type: string
+          format: date
+        recurrence:
+          type: string
+          enum: [weekly, biweekly, monthly]
+        status:
+          type: string
+          enum: [pending, paid, overdue, requested]
+        interestRate:
+          type: number
+          minimum: 0
+          description: Taxa de juros em % sobre o valor principal
+        lateFee:
+          type: number
+          minimum: 0
+          description: Multa por dia de atraso em R$
+        daysLate:
+          type: integer
+          minimum: 0
+          description: Número de dias de atraso
+
+    InvoiceUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, paid, overdue, requested]
+        amount:
+          type: number
+        dueDate:
+          type: string
+          format: date
+        interestRate:
+          type: number
+          minimum: 0
+        lateFee:
+          type: number
+          minimum: 0
+        daysLate:
+          type: integer
+          minimum: 0
+        interestPaid:
+          type: boolean
+          description: Marca os juros e multa como pagos separadamente
+
+    Debt:
+      type: object
+      required: [id, companyId, clientId, status, daysOverdue]
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        clientId:
+          type: integer
+        clientName:
+          type: ["string", "null"]
+        invoiceId:
+          type: ["integer", "null"]
+        invoiceAmount:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [open, closed]
+        daysOverdue:
+          type: integer
+
+    DebtUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [open, closed]
+
+    DashboardSummary:
+      type: object
+      required: [totalClients, activeClients, totalIncome, totalExpenses, netBalance, pendingInvoicesCount, pendingInvoicesTotal, overdueDebtsCount, overdueDebtsTotal, totalLoaned, todayLoaned, totalInterestDue]
+      properties:
+        totalClients:
+          type: integer
+        activeClients:
+          type: integer
+        totalIncome:
+          type: number
+        totalExpenses:
+          type: number
+        netBalance:
+          type: number
+        pendingInvoicesCount:
+          type: integer
+        pendingInvoicesTotal:
+          type: number
+        overdueDebtsCount:
+          type: integer
+        overdueDebtsTotal:
+          type: number
+        totalLoaned:
+          type: number
+          description: Soma do principal de todas as cobranças pendentes e vencidas (valor total emprestado ainda não recebido)
+        todayLoaned:
+          type: number
+          description: Soma do principal das cobranças criadas hoje
+        totalInterestDue:
+          type: number
+          description: Soma dos juros mensais de todas as cobranças ativas (pendentes/vencidas) com taxa de juros configurada
+
+    Subscription:
+      type: object
+      required: [id, companyId, plan, status, provider, createdAt]
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        plan:
+          type: string
+          enum: [free, pro, enterprise]
+        status:
+          type: string
+          enum: [trial, pending, active, past_due, canceled]
+        provider:
+          type: string
+        externalId:
+          type: ["string", "null"]
+        checkoutUrl:
+          type: ["string", "null"]
+        startedAt:
+          type: ["string", "null"]
+          format: date-time
+        expiresAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SubscriptionCreateInput:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          type: string
+          enum: [pro, enterprise]
+        phone:
+          type: string
+          description: Brazilian cellphone in format 11999999999
+        cnpj:
+          type: string
+          description: CNPJ ou CPF da empresa (somente números, obrigatório se não cadastrado)
+
+    WebhookEvent:
+      type: object
+      properties:
+        event:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    SubscriptionCreateResult:
+      type: object
+      required: [subscription, checkoutUrl]
+      properties:
+        subscription:
+          $ref: "#/components/schemas/Subscription"
+        checkoutUrl:
+          type: string
+
+    DashboardCashflowDay:
+      type: object
+      required: [date, income, expense, net]
+      properties:
+        date:
+          type: string
+        income:
+          type: number
+        expense:
+          type: number
+        net:
+          type: number
