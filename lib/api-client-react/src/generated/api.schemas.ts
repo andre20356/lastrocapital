@@ -172,6 +172,7 @@ export type InvoiceRecurrence =
   | null;
 
 export const InvoiceRecurrence = {
+  daily: "daily",
   weekly: "weekly",
   biweekly: "biweekly",
   monthly: "monthly",
@@ -220,6 +221,7 @@ export type InvoiceInputRecurrence =
   (typeof InvoiceInputRecurrence)[keyof typeof InvoiceInputRecurrence];
 
 export const InvoiceInputRecurrence = {
+  daily: "daily",
   weekly: "weekly",
   biweekly: "biweekly",
   monthly: "monthly",
