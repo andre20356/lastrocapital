@@ -635,7 +635,10 @@ export default function Invoices() {
         setDialogOpen(open);
         if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
       }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-h-[90dvh] overflow-y-auto overscroll-contain w-[95vw] sm:w-full sm:max-w-lg"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Nova Cobrança</DialogTitle>
           </DialogHeader>
