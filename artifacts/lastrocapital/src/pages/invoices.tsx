@@ -11,12 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useForm, useWatch } from "react-hook-form";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, CheckCircle, AlertCircle, FileText, Banknote, Calculator, BadgeCheck, Pencil } from "lucide-react";
+import {
+  Plus, Trash2, CheckCircle2, AlertCircle, FileText,
+  Banknote, Calculator, BadgeCheck, Pencil, ClipboardList,
+  Clock, XCircle, CircleCheck,
+} from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { getGetDashboardSummaryQueryKey, getListCashFlowQueryKey } from "@workspace/api-client-react";
@@ -34,13 +37,26 @@ interface InvoiceFormData {
   daysLate: string;
 }
 
-const statusConfig: Record<InvoiceStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className?: string }> = {
-  pending: { label: "Pendente", variant: "secondary" },
-  paid: { label: "Pago", variant: "default" },
-  overdue: { label: "Vencido", variant: "destructive" },
-  requested: { label: "Solicitação", variant: "outline" },
-  current: { label: "Em Dia", variant: "outline", className: "border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" },
+const STATUS_CONFIG: Record<InvoiceStatus, {
+  label: string;
+  icon: React.ElementType;
+  classes: string;
+}> = {
+  pending:   { label: "Pendente",    icon: Clock,          classes: "bg-muted text-muted-foreground border border-border" },
+  paid:      { label: "Pago",        icon: CircleCheck,    classes: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/25" },
+  overdue:   { label: "Vencido",     icon: XCircle,        classes: "bg-destructive/10 text-destructive border border-destructive/25" },
+  requested: { label: "Solicitação", icon: FileText,       classes: "bg-primary/10 text-primary border border-primary/25" },
+  current:   { label: "Em Dia",      icon: CheckCircle2,   classes: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/25" },
 };
+
+const FILTER_TABS: { value: InvoiceStatus | "all"; label: string }[] = [
+  { value: "all",       label: "Todas" },
+  { value: "pending",   label: "Pendente" },
+  { value: "paid",      label: "Pago" },
+  { value: "overdue",   label: "Vencido" },
+  { value: "requested", label: "Solicitação" },
+  { value: "current",   label: "Em Dia" },
+];
 
 interface Breakdown {
   principal: number;
@@ -71,11 +87,7 @@ interface EmprestimoSemanal {
   jurosTotal: number;
 }
 
-function calcularEmprestimoSemanal(
-  valorTotal: number,
-  numeroParcelas: number,
-  taxa: number
-): EmprestimoSemanal {
+function calcularEmprestimoSemanal(valorTotal: number, numeroParcelas: number, taxa: number): EmprestimoSemanal {
   const base = valorTotal / numeroParcelas;
   const juros = valorTotal * taxa;
   const parcela = base + juros;
@@ -91,13 +103,16 @@ export default function Invoices() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [payInterestId, setPayInterestId] = useState<number | null>(null);
   const [quitacaoId, setQuitacaoId] = useState<number | null>(null);
-  const [editingInvoice, setEditingInvoice] = useState<{ id: number; clientId: number; clientName?: string | null; amount?: number | null; dueDate?: string | null; recurrence?: string | null; status: string; interestRate?: number | null; lateFee?: number | null; daysLate?: number | null } | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<{
+    id: number; clientId: number; clientName?: string | null; amount?: number | null;
+    dueDate?: string | null; recurrence?: string | null; status: string;
+    interestRate?: number | null; lateFee?: number | null; daysLate?: number | null;
+  } | null>(null);
 
   const editForm = useForm<InvoiceFormData>({
     defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0" },
   });
 
-  // Loan calculator state
   const [loanTotal, setLoanTotal] = useState("");
   const [loanParcelas, setLoanParcelas] = useState("");
 
@@ -106,9 +121,7 @@ export default function Invoices() {
     { query: { queryKey: getListInvoicesQueryKey(statusFilter !== "all" ? { status: statusFilter } : undefined) } }
   );
 
-  const { data: clients } = useListClients(undefined, {
-    query: { queryKey: getListClientsQueryKey() }
-  });
+  const { data: clients } = useListClients(undefined, { query: { queryKey: getListClientsQueryKey() } });
 
   const createInvoice = useCreateInvoice();
   const updateInvoice = useUpdateInvoice();
@@ -127,14 +140,11 @@ export default function Invoices() {
   const breakdown = calcBreakdown(watchedAmount, watchedInterest, watchedLateFee, watchedDays);
   const hasEncargos = breakdown && (breakdown.interestAmount > 0 || breakdown.lateFeeTotal > 0);
 
-  // Weekly loan calculator result — taxa comes from the interestRate field
   const loanCalc: EmprestimoSemanal | null = (() => {
     const P = parseBRL(loanTotal);
     const n = parseInt(loanParcelas) || 0;
     const r = (parseFloat(watchedInterest) || 0) / 100;
-    if (P > 0 && n > 0 && r >= 0) {
-      return calcularEmprestimoSemanal(P, n, r);
-    }
+    if (P > 0 && n > 0 && r >= 0) return calcularEmprestimoSemanal(P, n, r);
     return null;
   })();
 
@@ -150,7 +160,6 @@ export default function Invoices() {
       form.setError("clientId", { message: "Selecione um cliente" });
       return;
     }
-
     createInvoice.mutate(
       {
         data: {
@@ -171,7 +180,7 @@ export default function Invoices() {
           setDialogOpen(false);
           form.reset();
           setLoanTotal(""); setLoanParcelas("");
-          toast({ title: "Cobrança criada" });
+          toast({ title: "Cobrança registrada" });
         },
         onError: (err: any) => {
           const msg = err?.response?.data?.error ?? "Erro ao criar cobrança. Tente novamente.";
@@ -188,7 +197,7 @@ export default function Invoices() {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListInvoicesQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
-          toast({ title: `Cobrança marcada como ${statusConfig[status].label.toLowerCase()}` });
+          toast({ title: `Cobrança marcada como ${STATUS_CONFIG[status].label.toLowerCase()}` });
         },
       }
     );
@@ -224,7 +233,7 @@ export default function Invoices() {
           queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
           queryClient.invalidateQueries({ queryKey: getListCashFlowQueryKey() });
           setQuitacaoId(null);
-          toast({ title: "Quitação registrada", description: "Cobrança marcada como paga (quitada)." });
+          toast({ title: "Quitação registrada", description: "Cobrança marcada como paga." });
         },
         onError: (err: any) => {
           const msg = err?.response?.data?.error ?? "Erro ao registrar quitação.";
@@ -305,33 +314,103 @@ export default function Invoices() {
       + (quitacaoInvoice.lateFee ?? 0) * (quitacaoInvoice.daysLate ?? 0)
     : 0;
 
+  // KPI counts — always from full unfiltered data
+  const { data: allInvoices } = useListInvoices(undefined, { query: { queryKey: getListInvoicesQueryKey() } });
+  const totalCount   = allInvoices?.length ?? 0;
+  const overdueCount = allInvoices?.filter((i) => i.status === "overdue").length ?? 0;
+  const pendingCount = allInvoices?.filter((i) => i.status === "pending" || i.status === "requested").length ?? 0;
+  const paidCount    = allInvoices?.filter((i) => i.status === "paid").length ?? 0;
+
+  const RECURRENCE_LABEL: Record<string, string> = { weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
+
   return (
     <AppLayout>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 md:mb-8">
+      {/* HEADER */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-7">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Cobranças</h1>
-          <p className="text-muted-foreground mt-1">Gerencie suas cobranças e faturas</p>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/25 flex items-center justify-center">
+              <ClipboardList className="h-3.5 w-3.5 text-amber-500" />
+            </div>
+            <h1 className="text-2xl font-bold">Cobranças</h1>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Contratos ativos, parcelas, juros e quitações
+          </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} data-testid="button-add-invoice">
-          <Plus className="h-4 w-4 mr-2" />
+        <Button onClick={() => setDialogOpen(true)} data-testid="button-add-invoice" className="gap-2">
+          <Plus className="h-4 w-4" />
           Nova Cobrança
         </Button>
       </div>
 
-      <div className="flex gap-3 mb-6">
-        {(["all", "pending", "paid", "overdue", "requested", "current"] as const).map((s) => (
-          <Button
-            key={s}
-            variant={statusFilter === s ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter(s)}
-            data-testid={`button-filter-${s}`}
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-7">
+        <Card className="border-border/60">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total</p>
+              <p className="text-xl font-bold tabular-nums">{isLoading ? "—" : totalCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className={overdueCount > 0 ? "border-destructive/20 bg-destructive/5" : "border-border/60"}>
+          <div className="p-4 flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${overdueCount > 0 ? "bg-destructive/15" : "bg-muted"}`}>
+              <XCircle className={`h-4 w-4 ${overdueCount > 0 ? "text-destructive" : "text-muted-foreground"}`} />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Vencidas</p>
+              <p className={`text-xl font-bold tabular-nums ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="border-border/60">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">A receber</p>
+              <p className="text-xl font-bold tabular-nums">{pendingCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="border-emerald-500/20 bg-emerald-500/5">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <CircleCheck className="h-4 w-4 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Pagas</p>
+              <p className="text-xl font-bold tabular-nums text-emerald-500">{paidCount}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* FILTROS */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        {FILTER_TABS.map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => setStatusFilter(value)}
+            data-testid={`button-filter-${value}`}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors border ${
+              statusFilter === value
+                ? "bg-foreground text-background border-foreground"
+                : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"
+            }`}
           >
-            {s === "all" ? "Todas" : statusConfig[s].label}
-          </Button>
+            {label}
+          </button>
         ))}
       </div>
 
+      {/* TABELA */}
       {isLoading ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
@@ -339,24 +418,28 @@ export default function Invoices() {
       ) : !invoices || invoices.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center py-16 text-center">
-            <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">Nenhuma cobrança encontrada</p>
-            <Button variant="outline" className="mt-4" onClick={() => setDialogOpen(true)}>Criar primeira cobrança</Button>
+            <ClipboardList className="h-10 w-10 text-muted-foreground mb-3 opacity-40" />
+            <p className="font-medium text-muted-foreground">Nenhuma cobrança encontrada</p>
+            <p className="text-sm text-muted-foreground/70 mt-1">Registre contratos e parcelas de empréstimos</p>
+            <Button variant="outline" className="mt-5" onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Criar primeira cobrança
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className="overflow-hidden">
           <CardContent className="p-0 overflow-x-auto">
             <table className="w-full min-w-[700px]">
               <thead>
-                <tr className="border-b border-border text-left text-sm text-muted-foreground">
-                  <th className="px-6 py-4 font-medium">Cliente</th>
-                  <th className="px-6 py-4 font-medium">Principal</th>
-                  <th className="px-6 py-4 font-medium">Total a Pagar</th>
-                  <th className="px-6 py-4 font-medium">Vencimento</th>
-                  <th className="px-6 py-4 font-medium">Recorrência</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium text-right">Ações</th>
+                <tr className="border-b border-border text-left text-xs text-muted-foreground bg-muted/30">
+                  <th className="px-5 py-3 font-medium">Cliente</th>
+                  <th className="px-5 py-3 font-medium">Principal</th>
+                  <th className="px-5 py-3 font-medium">Total a Pagar</th>
+                  <th className="px-5 py-3 font-medium">Vencimento</th>
+                  <th className="px-5 py-3 font-medium">Recorrência</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -369,63 +452,69 @@ export default function Invoices() {
                   const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate) / 100 : 0;
                   const lateFeeTotal = (inv.lateFee ?? 0) * (inv.daysLate ?? 0);
                   const alreadyPaidInterest = inv.interestPaid === true;
+                  const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
+                  const StatusIcon = cfg?.icon ?? FileText;
+
                   return (
-                    <tr key={inv.id} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors" data-testid={`row-invoice-${inv.id}`}>
-                      <td className="px-6 py-4 font-medium">{inv.clientName ?? `Cliente #${inv.clientId}`}</td>
-                      <td className="px-6 py-4 font-semibold">{formatCurrency(inv.amount)}</td>
-                      <td className="px-6 py-4">
+                    <tr
+                      key={inv.id}
+                      className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors group"
+                      data-testid={`row-invoice-${inv.id}`}
+                    >
+                      <td className="px-5 py-3.5 font-medium text-sm">
+                        {inv.clientName ?? `Cliente #${inv.clientId}`}
+                      </td>
+                      <td className="px-5 py-3.5 font-semibold text-sm tabular-nums">
+                        {formatCurrency(inv.amount)}
+                      </td>
+                      <td className="px-5 py-3.5 text-sm">
                         {isOverdueWithFees ? (
-                          <div>
-                            {alreadyPaidInterest ? (
-                              <div>
-                                <span className="font-semibold">{formatCurrency(inv.amount)}</span>
-                                <div className="mt-1">
-                                  <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-600">
-                                    Juros pagos
-                                  </Badge>
-                                </div>
+                          alreadyPaidInterest ? (
+                            <div>
+                              <span className="font-semibold tabular-nums">{formatCurrency(inv.amount)}</span>
+                              <div className="mt-1">
+                                <span className="text-xs text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5">
+                                  Juros pagos
+                                </span>
                               </div>
-                            ) : (
-                              <div>
-                                <span className="font-semibold text-destructive">{formatCurrency(inv.totalDue)}</span>
-                                <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                                  {(inv.interestRate ?? 0) > 0 && (
-                                    <div>Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}</div>
-                                  )}
-                                  {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
-                                    <div>Multa {inv.daysLate} dia(s) × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
-                                  )}
-                                </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="font-bold text-destructive tabular-nums">{formatCurrency(inv.totalDue)}</span>
+                              <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                {(inv.interestRate ?? 0) > 0 && (
+                                  <div>Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}</div>
+                                )}
+                                {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
+                                  <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
+                                )}
                               </div>
-                            )}
-                          </div>
+                            </div>
+                          )
                         ) : (
                           <div>
-                            <span className="text-muted-foreground font-medium">{formatCurrency(inv.amount)}</span>
+                            <span className="text-muted-foreground font-medium tabular-nums">{formatCurrency(inv.amount)}</span>
                             {hasInterest && !isPaid && (
-                              <div className="text-xs text-amber-600 mt-0.5">
+                              <div className="text-xs text-amber-500 mt-0.5">
                                 Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}
                               </div>
                             )}
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-muted-foreground">{formatDate(inv.dueDate)}</td>
-                      <td className="px-6 py-4 text-muted-foreground">
-                        {inv.recurrence
-                          ? ({ weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" } as Record<string, string>)[inv.recurrence!] ?? "-"
-                          : "-"}
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+                        {formatDate(inv.dueDate)}
                       </td>
-                      <td className="px-6 py-4">
-                        <Badge
-                          variant={statusConfig[inv.status as InvoiceStatus]?.variant ?? "secondary"}
-                          className={statusConfig[inv.status as InvoiceStatus]?.className}
-                          data-testid={`status-invoice-${inv.id}`}
-                        >
-                          {statusConfig[inv.status as InvoiceStatus]?.label ?? inv.status}
-                        </Badge>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                        {inv.recurrence ? (RECURRENCE_LABEL[inv.recurrence] ?? "-") : <span className="opacity-40">—</span>}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-5 py-3.5" data-testid={`status-invoice-${inv.id}`}>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${cfg?.classes ?? "bg-muted text-muted-foreground border border-border"}`}>
+                          <StatusIcon className="h-3 w-3" />
+                          {cfg?.label ?? inv.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1 flex-wrap">
                           {hasInterest && !isPaid && !alreadyPaidInterest && (
                             <Button
@@ -434,7 +523,7 @@ export default function Invoices() {
                               title="Pagar somente os juros do mês"
                               onClick={() => setPayInterestId(inv.id)}
                               data-testid={`button-pay-interest-${inv.id}`}
-                              className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 text-xs gap-1"
+                              className="h-7 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 text-xs gap-1 px-2"
                             >
                               <Banknote className="h-3.5 w-3.5" />
                               Pagar Juros
@@ -447,22 +536,42 @@ export default function Invoices() {
                               title="Registrar quitação (pagamento total)"
                               onClick={() => setQuitacaoId(inv.id)}
                               data-testid={`button-quitacao-${inv.id}`}
-                              className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 text-xs gap-1"
+                              className="h-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 text-xs gap-1 px-2"
                             >
                               <BadgeCheck className="h-3.5 w-3.5" />
                               Quitação
                             </Button>
                           )}
                           {inv.status === "pending" && (
-                            <Button variant="ghost" size="icon" title="Marcar como vencido" onClick={() => markAs(inv.id, "overdue")} data-testid={`button-overdue-invoice-${inv.id}`}>
-                              <AlertCircle className="h-4 w-4 text-destructive" />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title="Marcar como vencido"
+                              onClick={() => markAs(inv.id, "overdue")}
+                              data-testid={`button-overdue-invoice-${inv.id}`}
+                            >
+                              <AlertCircle className="h-3.5 w-3.5 text-destructive" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon" title="Editar cobrança" onClick={() => openEditDialog(inv as any)} data-testid={`button-edit-invoice-${inv.id}`}>
-                            <Pencil className="h-4 w-4 text-muted-foreground" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Editar cobrança"
+                            onClick={() => openEditDialog(inv as any)}
+                            data-testid={`button-edit-invoice-${inv.id}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteId(inv.id)} data-testid={`button-delete-invoice-${inv.id}`}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => setDeleteId(inv.id)}
+                            data-testid={`button-delete-invoice-${inv.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </div>
                       </td>
@@ -475,20 +584,16 @@ export default function Invoices() {
         </Card>
       )}
 
+      {/* DIALOG — Nova cobrança */}
       <Dialog open={dialogOpen} onOpenChange={(open) => {
         setDialogOpen(open);
-        if (!open) {
-          form.reset();
-          setLoanTotal(""); setLoanParcelas("");
-        }
+        if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
       }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova Cobrança</DialogTitle>
           </DialogHeader>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-
-            {/* Recurrence selector placed first so calculator appears contextually */}
             <div>
               <Label>Recorrência</Label>
               <Select value={watchedRecurrence} onValueChange={(v) => form.setValue("recurrence", v)}>
@@ -504,7 +609,6 @@ export default function Invoices() {
               </Select>
             </div>
 
-            {/* Loan calculator — shown when recurrence = weekly or biweekly */}
             {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-semibold text-amber-500">
@@ -514,29 +618,16 @@ export default function Invoices() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs">Valor Total (R$)</Label>
-                    <Input
-                      placeholder="0,00"
-                      value={loanTotal}
-                      onChange={(e) => setLoanTotal(e.target.value)}
-                      data-testid="input-loan-total"
-                    />
+                    <Input placeholder="0,00" value={loanTotal} onChange={(e) => setLoanTotal(e.target.value)} data-testid="input-loan-total" />
                   </div>
                   <div>
                     <Label className="text-xs">Nº de Parcelas</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      placeholder="ex: 10"
-                      value={loanParcelas}
-                      onChange={(e) => setLoanParcelas(e.target.value)}
-                      data-testid="input-loan-parcelas"
-                    />
+                    <Input type="number" min="1" placeholder="ex: 10" value={loanParcelas} onChange={(e) => setLoanParcelas(e.target.value)} data-testid="input-loan-parcelas" />
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Taxa usada: <strong>{watchedInterest || "0"}%</strong> — defina no campo Juros (%) abaixo
                 </p>
-
                 {loanCalc && (
                   <div className="rounded-md border border-border bg-background divide-y divide-border overflow-hidden text-sm">
                     <div className="flex justify-between items-center px-3 py-2">
@@ -553,7 +644,6 @@ export default function Invoices() {
                     </div>
                   </div>
                 )}
-
                 {loanCalc && (
                   <Button
                     type="button"
@@ -573,10 +663,7 @@ export default function Invoices() {
               <Label>Cliente *</Label>
               <Select
                 value={form.watch("clientId")}
-                onValueChange={(v) => {
-                  form.setValue("clientId", v);
-                  form.clearErrors("clientId");
-                }}
+                onValueChange={(v) => { form.setValue("clientId", v); form.clearErrors("clientId"); }}
               >
                 <SelectTrigger data-testid="select-invoice-client" className={form.formState.errors.clientId ? "border-destructive" : ""}>
                   <SelectValue placeholder="Selecione um cliente" />
@@ -606,12 +693,8 @@ export default function Invoices() {
               <div>
                 <Label htmlFor="inv-interest">
                   Juros (%)
-                  {watchedRecurrence === "weekly" && (
-                    <span className="ml-1 text-xs font-normal text-amber-500">= taxa semanal</span>
-                  )}
-                  {watchedRecurrence === "biweekly" && (
-                    <span className="ml-1 text-xs font-normal text-amber-500">= taxa quinzenal</span>
-                  )}
+                  {watchedRecurrence === "weekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa semanal</span>}
+                  {watchedRecurrence === "biweekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa quinzenal</span>}
                 </Label>
                 <Input id="inv-interest" type="number" min="0" step="0.01" placeholder="0" {...form.register("interestRate")} data-testid="input-invoice-interest" />
                 <p className="text-xs text-muted-foreground mt-1">
@@ -634,27 +717,23 @@ export default function Invoices() {
               <div className="rounded-lg border border-border bg-muted/40 divide-y divide-border overflow-hidden">
                 <div className="flex justify-between items-center px-4 py-2 text-sm">
                   <span className="text-muted-foreground">Principal</span>
-                  <span className="font-medium">{formatCurrency(breakdown.principal)}</span>
+                  <span className="font-medium tabular-nums">{formatCurrency(breakdown.principal)}</span>
                 </div>
                 {breakdown.interestAmount > 0 && (
                   <div className="flex justify-between items-center px-4 py-2 text-sm">
-                    <span className="text-muted-foreground">
-                      Juros ({watchedInterest}% × {formatCurrency(breakdown.principal)})
-                    </span>
-                    <span className="font-medium text-amber-400">+ {formatCurrency(breakdown.interestAmount)}</span>
+                    <span className="text-muted-foreground">Juros ({watchedInterest}% × {formatCurrency(breakdown.principal)})</span>
+                    <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.interestAmount)}</span>
                   </div>
                 )}
                 {breakdown.lateFeeTotal > 0 && (
                   <div className="flex justify-between items-center px-4 py-2 text-sm">
-                    <span className="text-muted-foreground">
-                      Multa ({watchedDays} dia(s) × {formatCurrency(parseFloat(watchedLateFee.replace(",", ".")) || 0)})
-                    </span>
-                    <span className="font-medium text-amber-400">+ {formatCurrency(breakdown.lateFeeTotal)}</span>
+                    <span className="text-muted-foreground">Multa ({watchedDays} dia(s) × {formatCurrency(parseFloat(watchedLateFee.replace(",", ".")) || 0)})</span>
+                    <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.lateFeeTotal)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center px-4 py-3 bg-muted/60">
                   <span className="text-sm font-semibold">Total a pagar</span>
-                  <span className={`font-bold text-base ${hasEncargos ? "text-destructive" : "text-foreground"}`}>
+                  <span className={`font-bold text-base tabular-nums ${hasEncargos ? "text-destructive" : "text-foreground"}`}>
                     {formatCurrency(breakdown.total)}
                   </span>
                 </div>
@@ -684,23 +763,21 @@ export default function Invoices() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); form.reset(); }}>Cancelar</Button>
-              <Button type="submit" disabled={createInvoice.isPending} data-testid="button-submit-invoice">Criar</Button>
+              <Button type="submit" disabled={createInvoice.isPending} data-testid="button-submit-invoice">Registrar</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Confirm pay interest dialog */}
+      {/* Pagar juros */}
       <AlertDialog open={payInterestId !== null} onOpenChange={(o) => !o && setPayInterestId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Pagar somente os juros?</AlertDialogTitle>
             <AlertDialogDescription>
               O cliente está pagando apenas os juros e multa
-              {payInterestAmount > 0 && (
-                <> no valor de <strong>{formatCurrency(payInterestAmount)}</strong></>
-              )}
-              . O principal de <strong>{formatCurrency(payInterestInvoice?.amount)}</strong> permanecerá em aberto.
+              {payInterestAmount > 0 && <> no valor de <strong>{formatCurrency(payInterestAmount)}</strong></>}.
+              {" "}O principal de <strong>{formatCurrency(payInterestInvoice?.amount)}</strong> permanecerá em aberto.
               {" "}Um lançamento será criado no fluxo de caixa.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -711,20 +788,18 @@ export default function Invoices() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Confirm quitação dialog */}
+      {/* Quitação */}
       <AlertDialog open={quitacaoId !== null} onOpenChange={(o) => !o && setQuitacaoId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Registrar quitação?</AlertDialogTitle>
             <AlertDialogDescription>
               O cliente está quitando a dívida completa
-              {quitacaoTotal > 0 && (
-                <> no valor total de <strong>{formatCurrency(quitacaoTotal)}</strong></>
-              )}
-              {quitacaoInvoice?.interestRate ? (
-                <>, incluindo juros de {quitacaoInvoice.interestRate}%/mês ({formatCurrency(((quitacaoInvoice.amount ?? 0) * (quitacaoInvoice.interestRate ?? 0)) / 100)})</>
-              ) : null}
-              . A cobrança será marcada como <strong>Paga</strong>.
+              {quitacaoTotal > 0 && <> no valor total de <strong>{formatCurrency(quitacaoTotal)}</strong></>}
+              {quitacaoInvoice?.interestRate
+                ? <>, incluindo juros de {quitacaoInvoice.interestRate}%/mês ({formatCurrency(((quitacaoInvoice.amount ?? 0) * (quitacaoInvoice.interestRate ?? 0)) / 100)})</>
+                : null
+              }. A cobrança será marcada como <strong>Paga</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -734,7 +809,7 @@ export default function Invoices() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit invoice dialog */}
+      {/* Editar cobrança */}
       <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -743,10 +818,7 @@ export default function Invoices() {
           <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
             <div>
               <Label>Cliente *</Label>
-              <Select
-                value={editForm.watch("clientId")}
-                onValueChange={(v) => { editForm.setValue("clientId", v); editForm.clearErrors("clientId"); }}
-              >
+              <Select value={editForm.watch("clientId")} onValueChange={(v) => { editForm.setValue("clientId", v); editForm.clearErrors("clientId"); }}>
                 <SelectTrigger data-testid="select-edit-invoice-client">
                   <SelectValue placeholder="Selecione um cliente" />
                 </SelectTrigger>
@@ -757,12 +829,10 @@ export default function Invoices() {
                 </SelectContent>
               </Select>
             </div>
-
             <div>
               <Label htmlFor="edit-inv-amount">Valor Principal (R$)</Label>
               <Input id="edit-inv-amount" placeholder="0,00" {...editForm.register("amount")} data-testid="input-edit-invoice-amount" />
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="edit-inv-interest">Juros (%)</Label>
@@ -773,17 +843,14 @@ export default function Invoices() {
                 <Input id="edit-inv-latefee" placeholder="0,00" {...editForm.register("lateFee")} data-testid="input-edit-invoice-latefee" />
               </div>
             </div>
-
             <div>
               <Label htmlFor="edit-inv-days">Dias de Atraso</Label>
               <Input id="edit-inv-days" type="number" min="0" step="1" placeholder="0" {...editForm.register("daysLate")} data-testid="input-edit-invoice-days-late" />
             </div>
-
             <div>
               <Label htmlFor="edit-inv-due">Data de Vencimento</Label>
               <Input id="edit-inv-due" type="date" {...editForm.register("dueDate")} data-testid="input-edit-invoice-due" />
             </div>
-
             <div>
               <Label>Recorrência</Label>
               <Select value={editForm.watch("recurrence")} onValueChange={(v) => editForm.setValue("recurrence", v)}>
@@ -798,7 +865,6 @@ export default function Invoices() {
                 </SelectContent>
               </Select>
             </div>
-
             <div>
               <Label>Status</Label>
               <Select value={editForm.watch("status")} onValueChange={(v) => editForm.setValue("status", v as InvoiceStatus)}>
@@ -814,7 +880,6 @@ export default function Invoices() {
                 </SelectContent>
               </Select>
             </div>
-
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditingInvoice(null)}>Cancelar</Button>
               <Button type="submit" disabled={updateInvoice.isPending} data-testid="button-submit-edit-invoice">Salvar</Button>
@@ -823,6 +888,7 @@ export default function Invoices() {
         </DialogContent>
       </Dialog>
 
+      {/* Excluir */}
       <AlertDialog open={deleteId !== null} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
