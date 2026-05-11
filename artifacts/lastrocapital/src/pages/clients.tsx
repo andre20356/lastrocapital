@@ -13,10 +13,20 @@ import { useForm } from "react-hook-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus, Pencil, Trash2, Search, Users, MessageCircle,
-  Link, AlertTriangle, Bell, Filter, UserCheck, UserX, ShieldAlert,
+  AlertTriangle, Bell, Filter, UserCheck, UserX, ShieldAlert,
 } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/format";
+
+function WhatsAppIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+      <path d="M12 0C5.373 0 0 5.373 0 12c0 2.116.553 4.103 1.523 5.824L.057 23.5l5.83-1.529A11.944 11.944 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 01-5.007-1.373l-.36-.214-3.724.977.995-3.63-.234-.374A9.818 9.818 0 0112 2.182c5.422 0 9.818 4.396 9.818 9.818 0 5.423-4.396 9.818-9.818 9.818z"/>
+    </svg>
+  );
+}
 
 interface ClientFormData {
   name: string;
@@ -129,11 +139,12 @@ export default function Clients() {
     );
   };
 
-  const copyInviteLink = (companyId: number) => {
+  const shareInviteViaWhatsapp = (companyId: number) => {
     const link = `${window.location.origin}/invite/${companyId}`;
-    navigator.clipboard.writeText(link).then(() => {
-      toast({ title: "Link de convite copiado!" });
-    });
+    const msg = encodeURIComponent(
+      `Olá! Acesse o link abaixo para se cadastrar como cliente:\n${link}`
+    );
+    window.open(`https://wa.me/?text=${msg}`, "_blank");
   };
 
   const { data: myCompany } = useGetMyCompany();
@@ -239,9 +250,13 @@ export default function Clients() {
         </div>
         <div className="flex gap-2">
           {companyId && (
-            <Button variant="outline" onClick={() => copyInviteLink(companyId)} className="gap-2">
-              <Link className="h-4 w-4" />
-              Link de Convite
+            <Button
+              variant="outline"
+              onClick={() => shareInviteViaWhatsapp(companyId)}
+              className="gap-2 border-green-500/40 text-green-600 hover:bg-green-500/10 hover:text-green-600 dark:text-green-400 dark:border-green-500/30"
+            >
+              <WhatsAppIcon className="h-4 w-4" />
+              Convidar via WhatsApp
             </Button>
           )}
           <Button onClick={openCreate} data-testid="button-add-client" className="gap-2">
