@@ -250,7 +250,9 @@ export const ListInvoicesResponseItem = zod.object({
   totalDue: zod.number().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
-  recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
+  recurrence: zod
+    .enum(["daily", "weekly", "biweekly", "monthly", "null"])
+    .nullish(),
   createdAt: zod.coerce.date(),
 });
 export const ListInvoicesResponse = zod.array(ListInvoicesResponseItem);
@@ -270,7 +272,7 @@ export const CreateInvoiceBody = zod.object({
   clientId: zod.number(),
   amount: zod.number().min(createInvoiceBodyAmountMin).optional(),
   dueDate: zod.coerce.date().optional(),
-  recurrence: zod.enum(["weekly", "biweekly", "monthly"]).optional(),
+  recurrence: zod.enum(["daily", "weekly", "biweekly", "monthly"]).optional(),
   status: zod
     .enum(["pending", "paid", "overdue", "requested", "current"])
     .optional(),
@@ -317,7 +319,9 @@ export const GetInvoiceResponse = zod.object({
   totalDue: zod.number().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
-  recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
+  recurrence: zod
+    .enum(["daily", "weekly", "biweekly", "monthly", "null"])
+    .nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -368,7 +372,9 @@ export const UpdateInvoiceResponse = zod.object({
   totalDue: zod.number().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
-  recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
+  recurrence: zod
+    .enum(["daily", "weekly", "biweekly", "monthly", "null"])
+    .nullish(),
   createdAt: zod.coerce.date(),
 });
 
