@@ -155,7 +155,8 @@ export default function Invoices() {
   const applyLoanCalc = () => {
     if (!loanCalc) return;
     form.setValue("amount", loanCalc.parcela.toFixed(2).replace(".", ","));
-    toast({ title: "Valor da parcela aplicado", description: `${formatCurrency(loanCalc.parcela)} por semana` });
+    const periodicidade = watchedRecurrence === "daily" ? "por dia" : watchedRecurrence === "weekly" ? "por semana" : "por quinzena";
+    toast({ title: "Valor da parcela aplicado", description: `${formatCurrency(loanCalc.parcela)} ${periodicidade}` });
   };
 
   const invoiceFormFields = () => (
@@ -168,6 +169,7 @@ export default function Invoices() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="none">Sem recorrência</SelectItem>
+            <SelectItem value="daily">Diário</SelectItem>
             <SelectItem value="weekly">Semanal</SelectItem>
             <SelectItem value="biweekly">Quinzenal</SelectItem>
             <SelectItem value="monthly">Mensal</SelectItem>
@@ -175,11 +177,11 @@ export default function Invoices() {
         </Select>
       </div>
 
-      {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
+      {(watchedRecurrence === "daily" || watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-amber-500">
             <Calculator className="h-4 w-4" />
-            {watchedRecurrence === "weekly" ? "Calculadora de Empréstimo Semanal" : "Calculadora de Empréstimo Quinzenal"}
+            {watchedRecurrence === "daily" ? "Calculadora de Empréstimo Diário" : watchedRecurrence === "weekly" ? "Calculadora de Empréstimo Semanal" : "Calculadora de Empréstimo Quinzenal"}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -197,7 +199,7 @@ export default function Invoices() {
           {loanCalc && (
             <div className="rounded-md border border-border bg-background divide-y divide-border overflow-hidden text-sm">
               <div className="flex justify-between items-center px-3 py-2">
-                <span className="text-muted-foreground">{watchedRecurrence === "weekly" ? "Parcela semanal" : "Parcela quinzenal"}</span>
+                <span className="text-muted-foreground">{watchedRecurrence === "daily" ? "Parcela diária" : watchedRecurrence === "weekly" ? "Parcela semanal" : "Parcela quinzenal"}</span>
                 <span className="font-bold text-amber-500">{formatCurrency(loanCalc.parcela)}</span>
               </div>
               <div className="flex justify-between items-center px-3 py-2">
@@ -247,10 +249,10 @@ export default function Invoices() {
 
       <div>
         <Label htmlFor="inv-amount">
-          {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") ? "Valor da Parcela (R$)" : "Valor Principal (R$)"}
+          {(watchedRecurrence === "daily" || watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") ? "Valor da Parcela (R$)" : "Valor Principal (R$)"}
         </Label>
         <Input id="inv-amount" placeholder="0,00" {...form.register("amount")} data-testid="input-invoice-amount" />
-        {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
+        {(watchedRecurrence === "daily" || watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
           <p className="text-xs text-muted-foreground mt-1">Use a calculadora acima para preencher automaticamente</p>
         )}
       </div>
@@ -259,12 +261,13 @@ export default function Invoices() {
         <div>
           <Label htmlFor="inv-interest">
             Juros (%)
+            {watchedRecurrence === "daily" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa diária</span>}
             {watchedRecurrence === "weekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa semanal</span>}
             {watchedRecurrence === "biweekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa quinzenal</span>}
           </Label>
           <Input id="inv-interest" type="number" min="0" step="0.01" placeholder="0" {...form.register("interestRate")} data-testid="input-invoice-interest" />
           <p className="text-xs text-muted-foreground mt-1">
-            {watchedRecurrence === "weekly" ? "taxa semanal usada na calculadora" : watchedRecurrence === "biweekly" ? "taxa quinzenal usada na calculadora" : "% sobre o principal"}
+            {watchedRecurrence === "daily" ? "taxa diária usada na calculadora" : watchedRecurrence === "weekly" ? "taxa semanal usada na calculadora" : watchedRecurrence === "biweekly" ? "taxa quinzenal usada na calculadora" : "% sobre o principal"}
           </p>
         </div>
         <div>
@@ -527,7 +530,7 @@ export default function Invoices() {
     clientParcelasMap.set(clientId, (clientParcelasMap.get(clientId) ?? 0) + 1);
   });
 
-  const RECURRENCE_LABEL: Record<string, string> = { weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
+  const RECURRENCE_LABEL: Record<string, string> = { daily: "Diário", weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
 
   return (
     <AppLayout>
@@ -935,6 +938,7 @@ export default function Invoices() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem recorrência</SelectItem>
+                  <SelectItem value="daily">Diário</SelectItem>
                   <SelectItem value="weekly">Semanal</SelectItem>
                   <SelectItem value="biweekly">Quinzenal</SelectItem>
                   <SelectItem value="monthly">Mensal</SelectItem>
