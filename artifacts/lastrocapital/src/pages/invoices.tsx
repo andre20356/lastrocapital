@@ -343,6 +343,16 @@ export default function Invoices() {
   );
   const paidJurosCount = clientsWhoPayedJuros.size;
 
+  // Mapa clientId → total de parcelas de juros pagas (todos os tempos)
+  const clientParcelasMap = new Map<number, number>();
+  (jurosEntries ?? []).forEach((e) => {
+    const match = e.description?.match(/#(\d+)$/);
+    if (!match) return;
+    const clientId = invoiceClientMap.get(Number(match[1]));
+    if (clientId == null) return;
+    clientParcelasMap.set(clientId, (clientParcelasMap.get(clientId) ?? 0) + 1);
+  });
+
   const RECURRENCE_LABEL: Record<string, string> = { weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
 
   return (
@@ -461,6 +471,7 @@ export default function Invoices() {
                   <th className="px-5 py-3 font-medium">Total a Pagar</th>
                   <th className="px-5 py-3 font-medium">Vencimento</th>
                   <th className="px-5 py-3 font-medium">Recorrência</th>
+                  <th className="px-5 py-3 font-medium text-center">Parcelas Pagas</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 font-medium text-right">Ações</th>
                 </tr>
@@ -530,6 +541,18 @@ export default function Invoices() {
                       </td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground">
                         {inv.recurrence ? (RECURRENCE_LABEL[inv.recurrence] ?? "-") : <span className="opacity-40">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-center">
+                        {(() => {
+                          const count = clientParcelasMap.get(inv.clientId) ?? 0;
+                          return count > 0 ? (
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-xs font-bold text-emerald-500">
+                              {count}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/40 text-xs">—</span>
+                          );
+                        })()}
                       </td>
                       <td className="px-5 py-3.5" data-testid={`status-invoice-${inv.id}`}>
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${cfg?.classes ?? "bg-muted text-muted-foreground border border-border"}`}>
