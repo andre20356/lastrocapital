@@ -3,6 +3,11 @@ import { eq, desc } from "drizzle-orm";
 import { db, subscriptionsTable } from "@workspace/db";
 import type { AuthenticatedRequest } from "./requireAuth";
 
+const ADMIN_USER_IDS = (process.env.ADMIN_CLERK_USER_IDS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const requireActiveSubscription = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -10,6 +15,12 @@ export const requireActiveSubscription = async (
 ): Promise<void> => {
   if (!req.companyId) {
     res.status(403).json({ error: "Company not registered" });
+    return;
+  }
+
+  // Administradores têm acesso ilimitado sem assinatura
+  if (req.userId && ADMIN_USER_IDS.includes(req.userId)) {
+    next();
     return;
   }
 
