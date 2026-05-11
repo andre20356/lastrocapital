@@ -3,6 +3,7 @@ import {
   useListInvoices, getListInvoicesQueryKey,
   useCreateInvoice, useUpdateInvoice, useDeleteInvoice,
   useListClients, getListClientsQueryKey,
+  useListCashFlow,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -319,7 +320,28 @@ export default function Invoices() {
   const totalCount   = allInvoices?.length ?? 0;
   const overdueCount = allInvoices?.filter((i) => i.status === "overdue").length ?? 0;
   const pendingCount = allInvoices?.filter((i) => i.status === "pending" || i.status === "requested").length ?? 0;
-  const paidCount    = allInvoices?.filter((i) => i.status === "paid").length ?? 0;
+
+  // Pagas (juros) = clientes distintos que pagaram juros este mês via cashflow
+  const { data: jurosEntries } = useListCashFlow({ type: "income", category: "juros" });
+  const nowInv = new Date();
+  const thisMonthInv = nowInv.getMonth();
+  const thisYearInv = nowInv.getFullYear();
+  const invoiceClientMap = new Map((allInvoices ?? []).map((inv) => [inv.id, inv.clientId]));
+  const jurosThisMonth = (jurosEntries ?? []).filter((e) => {
+    if (!e.date) return true;
+    const d = new Date(e.date);
+    return d.getMonth() === thisMonthInv && d.getFullYear() === thisYearInv;
+  });
+  const clientsWhoPayedJuros = new Set(
+    jurosThisMonth
+      .map((e) => {
+        const match = e.description?.match(/#(\d+)$/);
+        if (!match) return null;
+        return invoiceClientMap.get(Number(match[1]));
+      })
+      .filter((id): id is number => id != null)
+  );
+  const paidJurosCount = clientsWhoPayedJuros.size;
 
   const RECURRENCE_LABEL: Record<string, string> = { weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
 
@@ -385,8 +407,9 @@ export default function Invoices() {
               <CircleCheck className="h-4 w-4 text-emerald-500" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Pagas</p>
-              <p className="text-xl font-bold tabular-nums text-emerald-500">{paidCount}</p>
+              <p className="text-xs text-muted-foreground">Pagaram juros</p>
+              <p className="text-xl font-bold tabular-nums text-emerald-500">{paidJurosCount}</p>
+              <p className="text-[10px] text-muted-foreground/60 leading-tight">clientes este mês</p>
             </div>
           </div>
         </Card>
