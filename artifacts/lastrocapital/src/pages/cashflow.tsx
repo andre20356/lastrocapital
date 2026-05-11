@@ -3,6 +3,7 @@ import {
   useListCashFlow, getListCashFlowQueryKey,
   useCreateCashFlowEntry, useDeleteCashFlowEntry,
   useGetCashFlowByCategory, getGetCashFlowByCategoryQueryKey,
+  useListInvoices,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -65,9 +66,42 @@ export default function CashFlow() {
     },
   });
 
-  const totalIncome = entries?.filter((e) => e.type === "income").reduce((s, e) => s + Number(e.amount), 0) ?? 0;
   const totalExpense = entries?.filter((e) => e.type === "expense").reduce((s, e) => s + Number(e.amount), 0) ?? 0;
-  const balance = totalIncome - totalExpense;
+
+  // Recuperado = soma dos valores principais de cobranças quitadas (pagas) no mês atual
+  const { data: paidInvoices } = useListInvoices({ status: "paid" });
+  const now = new Date();
+  const thisMonth = now.getMonth();
+  const thisYear = now.getFullYear();
+
+  const recuperado = (paidInvoices ?? []).reduce((sum, inv) => {
+    if (!inv.dueDate) return sum + (inv.amount ?? 0);
+    const due = new Date(inv.dueDate);
+    if (due.getMonth() === thisMonth && due.getFullYear() === thisYear) {
+      return sum + (inv.amount ?? 0);
+    }
+    return sum;
+  }, 0);
+
+  // Resultado Operacional = soma dos juros de cobranças pendentes/em dia com vencimento no mês atual
+  const { data: pendingInvoices } = useListInvoices({ status: "pending" });
+  const { data: currentInvoices } = useListInvoices({ status: "current" });
+  const { data: requestedInvoices } = useListInvoices({ status: "requested" });
+
+  const activeDueThisMonth = [
+    ...(pendingInvoices ?? []),
+    ...(currentInvoices ?? []),
+    ...(requestedInvoices ?? []),
+  ].filter((inv) => {
+    if (!inv.dueDate) return false;
+    const due = new Date(inv.dueDate);
+    return due.getMonth() === thisMonth && due.getFullYear() === thisYear;
+  });
+
+  const resultadoOperacional = activeDueThisMonth.reduce((sum, inv) => {
+    const interest = ((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100;
+    return sum + interest;
+  }, 0);
 
   const onSubmit = (data: CashFlowFormData) => {
     createEntry.mutate(
@@ -134,16 +168,14 @@ export default function CashFlow() {
         <Card className="border-emerald-500/20 bg-emerald-500/5 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {typeFilter === "expense" ? "Emprestado (filtro)" : "Recuperado"}
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Recuperado</CardTitle>
             <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center">
               <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-500" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-500">{formatCurrency(totalIncome)}</div>
-            <p className="text-xs text-muted-foreground mt-1">dinheiro que voltou</p>
+            <div className="text-2xl font-bold text-emerald-500">{formatCurrency(recuperado)}</div>
+            <p className="text-xs text-muted-foreground mt-1">quitações recebidas este mês</p>
           </CardContent>
         </Card>
 
@@ -164,21 +196,21 @@ export default function CashFlow() {
           </CardContent>
         </Card>
 
-        {/* Resultado */}
-        <Card className={`relative overflow-hidden ${balance >= 0 ? "border-emerald-500/20" : "border-destructive/20"}`}>
-          <div className={`absolute inset-0 bg-gradient-to-br ${balance >= 0 ? "from-emerald-500/5" : "from-destructive/5"} to-transparent pointer-events-none`} />
+        {/* Resultado Operacional */}
+        <Card className="border-emerald-500/20 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Resultado Operacional</CardTitle>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${balance >= 0 ? "bg-emerald-500/15" : "bg-destructive/15"}`}>
-              <TrendingUp className={`h-3.5 w-3.5 ${balance >= 0 ? "text-emerald-500" : "text-destructive"}`} />
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+              <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${balance >= 0 ? "text-emerald-500" : "text-destructive"}`}>
-              {formatCurrency(balance)}
+            <div className="text-2xl font-bold text-emerald-500">
+              {formatCurrency(resultadoOperacional)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {balance >= 0 ? "saldo positivo" : "saldo negativo"}
+              juros previstos este mês ({activeDueThisMonth.length} cobranças)
             </p>
           </CardContent>
         </Card>
