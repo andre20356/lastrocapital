@@ -88,11 +88,16 @@ export default function CashFlow() {
   const { data: currentInvoices } = useListInvoices({ status: "current" });
   const { data: requestedInvoices } = useListInvoices({ status: "requested" });
 
-  const activeDueThisMonth = [
+  const allActiveInvoices = [
     ...(pendingInvoices ?? []),
     ...(currentInvoices ?? []),
     ...(requestedInvoices ?? []),
-  ].filter((inv) => {
+  ];
+
+  // Emprestado = total de todos os valores ativos na rua (todos os clientes)
+  const totalEmprestado = allActiveInvoices.reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
+
+  const activeDueThisMonth = allActiveInvoices.filter((inv) => {
     if (!inv.dueDate) return false;
     const due = new Date(inv.dueDate);
     return due.getMonth() === thisMonth && due.getFullYear() === thisYear;
@@ -183,16 +188,14 @@ export default function CashFlow() {
         <Card className="border-destructive/20 bg-destructive/5 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {typeFilter === "income" ? "Recebido (filtro)" : "Emprestado"}
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Emprestado</CardTitle>
             <div className="w-7 h-7 rounded-lg bg-destructive/15 flex items-center justify-center">
               <ArrowUpRight className="h-3.5 w-3.5 text-destructive" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">{formatCurrency(totalExpense)}</div>
-            <p className="text-xs text-muted-foreground mt-1">dinheiro na rua</p>
+            <div className="text-2xl font-bold text-destructive">{formatCurrency(totalEmprestado)}</div>
+            <p className="text-xs text-muted-foreground mt-1">total na rua ({allActiveInvoices.length} clientes)</p>
           </CardContent>
         </Card>
 
