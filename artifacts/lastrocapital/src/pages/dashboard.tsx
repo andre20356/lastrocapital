@@ -7,6 +7,7 @@ import {
   getListInvoicesQueryKey,
   useListClients,
   getListClientsQueryKey,
+  useListCashFlow,
 } from "@workspace/api-client-react";
 import type { Invoice, Client } from "@workspace/api-client-react";
 import { useUser } from "@clerk/react";
@@ -98,20 +99,18 @@ export default function Dashboard() {
     })
     .slice(0, 8);
 
-  // Saldo Líquido = soma dos juros efetivamente pagos no mês atual
+  // Saldo Líquido = soma das entradas de juros recebidos (cashflow income, category=juros) no mês atual
+  const { data: jurosEntries } = useListCashFlow({ type: "income", category: "juros" });
   const nowDash = new Date();
   const thisMonthDash = nowDash.getMonth();
   const thisYearDash = nowDash.getFullYear();
-  const jurosPagosMes = (invoicesRaw ?? [])
-    .filter((inv: Invoice) => {
-      if (inv.status !== "paid") return false;
-      if (!inv.dueDate) return true;
-      const due = new Date(inv.dueDate + "T00:00:00");
-      return due.getMonth() === thisMonthDash && due.getFullYear() === thisYearDash;
+  const jurosPagosMes = (jurosEntries ?? [])
+    .filter((entry) => {
+      if (!entry.date) return true;
+      const d = new Date(entry.date);
+      return d.getMonth() === thisMonthDash && d.getFullYear() === thisYearDash;
     })
-    .reduce((sum: number, inv: Invoice) => {
-      return sum + ((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100;
-    }, 0);
+    .reduce((sum: number, entry) => sum + Number(entry.amount ?? 0), 0);
 
   const formattedDaily = (dailyData ?? []).map((d) => ({
     ...d,
