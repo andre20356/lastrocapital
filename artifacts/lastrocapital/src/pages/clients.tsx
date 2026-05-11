@@ -2,17 +2,19 @@ import { useState } from "react";
 import { useListClients, getListClientsQueryKey, useCreateClient, useUpdateClient, useDeleteClient, useGetMyCompany, useListInvoices } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useForm } from "react-hook-form";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Pencil, Trash2, Search, Users, MessageCircle, Link, AlertTriangle, Bell } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, Search, Users, MessageCircle,
+  Link, AlertTriangle, Bell, Filter, UserCheck, UserX, ShieldAlert,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/format";
 
@@ -106,7 +108,7 @@ export default function Clients() {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: getListClientsQueryKey() });
             setDialogOpen(false);
-            toast({ title: "Cliente criado com sucesso" });
+            toast({ title: "Cliente adicionado à carteira" });
           },
         }
       );
@@ -121,7 +123,7 @@ export default function Clients() {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListClientsQueryKey() });
           setDeleteId(null);
-          toast({ title: "Cliente removido" });
+          toast({ title: "Cliente removido da carteira" });
         },
       }
     );
@@ -150,7 +152,6 @@ export default function Clients() {
     return acc;
   }, {});
 
-  // Find invoices due in the next 3 days (pending or requested, not yet overdue)
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const in3Days = new Date(todayStart);
@@ -166,7 +167,6 @@ export default function Clients() {
     })
     .reduce<Record<number, typeof allActiveinvoices[0]>>((acc, inv) => {
       const cid = inv.clientId;
-      // keep the earliest due date per client
       if (!acc[cid] || new Date(inv.dueDate!) < new Date(acc[cid].dueDate!)) {
         acc[cid] = inv;
       }
@@ -181,7 +181,7 @@ export default function Clients() {
     const number = digits.startsWith("55") ? digits : `55${digits}`;
     const principal = inv.amount ?? 0;
     const interest = (principal * (inv.interestRate ?? 0)) / 100;
-    const lateFees = 0; // not overdue yet
+    const lateFees = 0;
     const total = principal + interest;
     const msg =
       `🔹 Mensagem automática — Lembrete de vencimento (3 dias antes)\n\n` +
@@ -216,28 +216,91 @@ export default function Clients() {
     return `https://wa.me/${number}?text=${encodeURIComponent(msg)}`;
   };
 
+  // KPI counts
+  const totalClients = clients?.length ?? 0;
+  const activeCount = clients?.filter((c) => c.status === "active").length ?? 0;
+  const inactiveCount = clients?.filter((c) => c.status === "inactive").length ?? 0;
+  const overdueCount = Object.keys(overdueByClient).length;
+
   return (
     <AppLayout>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 md:mb-8">
+      {/* HEADER */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-7">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Clientes</h1>
-          <p className="text-muted-foreground mt-1">Gerencie sua base de clientes</p>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center">
+              <Users className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <h1 className="text-2xl font-bold">Carteira de Clientes</h1>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Tomadores de crédito, contatos e situação operacional
+          </p>
         </div>
         <div className="flex gap-2">
           {companyId && (
-            <Button variant="outline" onClick={() => copyInviteLink(companyId)}>
-              <Link className="h-4 w-4 mr-2" />
+            <Button variant="outline" onClick={() => copyInviteLink(companyId)} className="gap-2">
+              <Link className="h-4 w-4" />
               Link de Convite
             </Button>
           )}
-          <Button onClick={openCreate} data-testid="button-add-client">
-            <Plus className="h-4 w-4 mr-2" />
+          <Button onClick={openCreate} data-testid="button-add-client" className="gap-2">
+            <Plus className="h-4 w-4" />
             Novo Cliente
           </Button>
         </div>
       </div>
 
-      <div className="flex gap-4 mb-6">
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-7">
+        <Card className="border-border/60">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total</p>
+              <p className="text-xl font-bold tabular-nums">{isLoading ? "—" : totalClients}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="border-emerald-500/20 bg-emerald-500/5">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <UserCheck className="h-4 w-4 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Ativos</p>
+              <p className="text-xl font-bold tabular-nums text-emerald-500">{isLoading ? "—" : activeCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className="border-border/60">
+          <div className="p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <UserX className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Inativos</p>
+              <p className="text-xl font-bold tabular-nums">{isLoading ? "—" : inactiveCount}</p>
+            </div>
+          </div>
+        </Card>
+        <Card className={overdueCount > 0 ? "border-destructive/20 bg-destructive/5" : "border-border/60"}>
+          <div className="p-4 flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${overdueCount > 0 ? "bg-destructive/15" : "bg-muted"}`}>
+              <ShieldAlert className={`h-4 w-4 ${overdueCount > 0 ? "text-destructive" : "text-muted-foreground"}`} />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Em atraso</p>
+              <p className={`text-xl font-bold tabular-nums ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* BUSCA + FILTRO */}
+      <div className="flex gap-3 mb-5">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -248,18 +311,22 @@ export default function Clients() {
             data-testid="input-search-clients"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
-          <SelectTrigger className="w-40" data-testid="select-status-filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="active">Ativos</SelectItem>
-            <SelectItem value="inactive">Inativos</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground hidden sm:block" />
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+            <SelectTrigger className="w-36 h-9 text-sm" data-testid="select-status-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="active">Ativos</SelectItem>
+              <SelectItem value="inactive">Inativos</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
+      {/* TABELA */}
       {isLoading ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
@@ -267,23 +334,27 @@ export default function Clients() {
       ) : filtered.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <Users className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">Nenhum cliente encontrado</p>
-            <Button variant="outline" className="mt-4" onClick={openCreate}>Adicionar primeiro cliente</Button>
+            <Users className="h-10 w-10 text-muted-foreground mb-3 opacity-40" />
+            <p className="font-medium text-muted-foreground">Nenhum cliente encontrado</p>
+            <p className="text-sm text-muted-foreground/70 mt-1">Adicione tomadores de crédito à sua carteira</p>
+            <Button variant="outline" className="mt-5" onClick={openCreate}>
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar primeiro cliente
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className="overflow-hidden">
           <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full min-w-[600px]">
+            <table className="w-full min-w-[620px]">
               <thead>
-                <tr className="border-b border-border text-left text-sm text-muted-foreground">
-                  <th className="px-6 py-4 font-medium">Nome</th>
-                  <th className="px-6 py-4 font-medium">Telefone</th>
-                  <th className="px-6 py-4 font-medium">E-mail</th>
-                  <th className="px-6 py-4 font-medium">Documento</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium text-right">Ações</th>
+                <tr className="border-b border-border text-left text-xs text-muted-foreground bg-muted/30">
+                  <th className="px-5 py-3 font-medium">Nome</th>
+                  <th className="px-5 py-3 font-medium">Telefone</th>
+                  <th className="px-5 py-3 font-medium">E-mail</th>
+                  <th className="px-5 py-3 font-medium">Documento</th>
+                  <th className="px-5 py-3 font-medium">Situação</th>
+                  <th className="px-5 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -291,64 +362,106 @@ export default function Clients() {
                   const waUrl = whatsappUrl(client.phone, client.name);
                   const alertUrl = alertWhatsappUrl(client.phone, client.name, client.id);
                   const reminderUrl = reminderWhatsappUrl(client.phone, client.name, client.id);
+                  const hasOverdue = !!overdueByClient[client.id];
+
                   return (
-                    <tr key={client.id} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors" data-testid={`row-client-${client.id}`}>
-                      <td className="px-6 py-4 font-medium">
-                        {client.name}
-                        {client.referralSource === "invite_link" && (
-                          <span className="ml-2 text-xs text-primary bg-primary/10 rounded px-1 py-0.5">convite</span>
+                    <tr
+                      key={client.id}
+                      className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors group"
+                      data-testid={`row-client-${client.id}`}
+                    >
+                      <td className="px-5 py-3.5 font-medium">
+                        <div className="flex items-center gap-2">
+                          <span>{client.name}</span>
+                          {client.referralSource === "invite_link" && (
+                            <span className="text-xs text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5">
+                              convite
+                            </span>
+                          )}
+                          {hasOverdue && (
+                            <span className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-1.5 py-0.5">
+                              em atraso
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                        {client.phone ?? <span className="opacity-40">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                        {client.email ?? <span className="opacity-40">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                        {client.document ?? <span className="opacity-40">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5" data-testid={`status-client-${client.id}`}>
+                        {client.status === "active" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/25">
+                            <UserCheck className="h-3 w-3" />
+                            Ativo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-muted text-muted-foreground border border-border">
+                            <UserX className="h-3 w-3" />
+                            Inativo
+                          </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-muted-foreground">{client.phone ?? "-"}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{client.email ?? "-"}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{client.document ?? "-"}</td>
-                      <td className="px-6 py-4">
-                        <Badge variant={client.status === "active" ? "default" : "secondary"} data-testid={`status-client-${client.id}`}>
-                          {client.status === "active" ? "Ativo" : "Inativo"}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-end gap-1">
                           {reminderUrl && (
                             <Button
                               variant="ghost"
                               size="icon"
-                              title="Enviar lembrete de vencimento (3 dias) via WhatsApp"
+                              className="h-7 w-7 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"
+                              title="Lembrete de vencimento via WhatsApp (3 dias)"
                               onClick={() => window.open(reminderUrl, "_blank")}
-                              className="text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
                               data-testid={`button-reminder-client-${client.id}`}
                             >
-                              <Bell className="h-4 w-4" />
+                              <Bell className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           {alertUrl && (
                             <Button
                               variant="ghost"
                               size="icon"
-                              title="Alertar cliente sobre atraso via WhatsApp"
+                              className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title="Alertar sobre atraso via WhatsApp"
                               onClick={() => window.open(alertUrl, "_blank")}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
                               data-testid={`button-alert-client-${client.id}`}
                             >
-                              <AlertTriangle className="h-4 w-4" />
+                              <AlertTriangle className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           {waUrl && (
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-7 w-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
                               title="Chamar no WhatsApp"
                               onClick={() => window.open(waUrl, "_blank")}
                               data-testid={`button-whatsapp-client-${client.id}`}
                             >
-                              <MessageCircle className="h-4 w-4 text-emerald-500" />
+                              <MessageCircle className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(client)} data-testid={`button-edit-client-${client.id}`}>
-                            <Pencil className="h-4 w-4" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => openEdit(client)}
+                            data-testid={`button-edit-client-${client.id}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteId(client.id)} data-testid={`button-delete-client-${client.id}`}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => setDeleteId(client.id)}
+                            data-testid={`button-delete-client-${client.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </div>
                       </td>
@@ -361,6 +474,7 @@ export default function Clients() {
         </Card>
       )}
 
+      {/* DIALOG — Cadastro / Edição */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -368,23 +482,23 @@ export default function Clients() {
           </DialogHeader>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <div>
-              <Label htmlFor="name">Nome *</Label>
-              <Input id="name" {...form.register("name", { required: true })} data-testid="input-client-name" />
+              <Label htmlFor="name">Nome completo *</Label>
+              <Input id="name" placeholder="Nome do tomador" {...form.register("name", { required: true })} data-testid="input-client-name" />
             </div>
             <div>
-              <Label htmlFor="phone">Telefone</Label>
-              <Input id="phone" {...form.register("phone")} data-testid="input-client-phone" />
+              <Label htmlFor="phone">Telefone / WhatsApp</Label>
+              <Input id="phone" placeholder="Ex: 11 9 9999-9999" {...form.register("phone")} data-testid="input-client-phone" />
             </div>
             <div>
               <Label htmlFor="email">E-mail</Label>
               <Input id="email" type="email" {...form.register("email")} data-testid="input-client-email" />
             </div>
             <div>
-              <Label htmlFor="document">CPF/CNPJ</Label>
-              <Input id="document" {...form.register("document")} data-testid="input-client-document" />
+              <Label htmlFor="document">CPF / CNPJ</Label>
+              <Input id="document" placeholder="000.000.000-00" {...form.register("document")} data-testid="input-client-document" />
             </div>
             <div>
-              <Label>Status</Label>
+              <Label>Situação</Label>
               <Select value={form.watch("status")} onValueChange={(v) => form.setValue("status", v as any)}>
                 <SelectTrigger data-testid="select-client-status">
                   <SelectValue />
@@ -398,17 +512,18 @@ export default function Clients() {
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
               <Button type="submit" disabled={createClient.isPending || updateClient.isPending} data-testid="button-submit-client">
-                {editingId ? "Salvar" : "Criar"}
+                {editingId ? "Salvar alterações" : "Adicionar à carteira"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
+      {/* ALERT — Confirmar exclusão */}
       <AlertDialog open={deleteId !== null} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover cliente?</AlertDialogTitle>
+            <AlertDialogTitle>Remover cliente da carteira?</AlertDialogTitle>
             <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
