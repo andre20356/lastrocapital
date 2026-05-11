@@ -14,4 +14,5 @@ export const InvoiceUpdateStatus = {
   paid: "paid",
   overdue: "overdue",
   requested: "requested",
+  current: "current",
 } as const;

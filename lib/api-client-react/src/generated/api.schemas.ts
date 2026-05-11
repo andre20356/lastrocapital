@@ -161,6 +161,7 @@ export const InvoiceStatus = {
   paid: "paid",
   overdue: "overdue",
   requested: "requested",
+  current: "current",
 } as const;
 
 /**
@@ -232,6 +233,7 @@ export const InvoiceInputStatus = {
   paid: "paid",
   overdue: "overdue",
   requested: "requested",
+  current: "current",
 } as const;
 
 export interface InvoiceInput {
@@ -266,6 +268,7 @@ export const InvoiceUpdateStatus = {
   paid: "paid",
   overdue: "overdue",
   requested: "requested",
+  current: "current",
 } as const;
 
 export interface InvoiceUpdate {
@@ -447,6 +450,7 @@ export const ListInvoicesStatus = {
   paid: "paid",
   overdue: "overdue",
   requested: "requested",
+  current: "current",
   all: "all",
 } as const;
 

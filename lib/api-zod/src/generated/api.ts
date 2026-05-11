@@ -226,7 +226,7 @@ export const GetCashFlowByCategoryResponse = zod.array(
  */
 export const ListInvoicesQueryParams = zod.object({
   status: zod
-    .enum(["pending", "paid", "overdue", "requested", "all"])
+    .enum(["pending", "paid", "overdue", "requested", "current", "all"])
     .optional(),
   clientId: zod.coerce.number().optional(),
 });
@@ -248,7 +248,7 @@ export const ListInvoicesResponseItem = zod.object({
     .nullish()
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
-  status: zod.enum(["pending", "paid", "overdue", "requested"]),
+  status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
   createdAt: zod.coerce.date(),
@@ -271,7 +271,9 @@ export const CreateInvoiceBody = zod.object({
   amount: zod.number().min(createInvoiceBodyAmountMin).optional(),
   dueDate: zod.coerce.date().optional(),
   recurrence: zod.enum(["weekly", "biweekly", "monthly"]).optional(),
-  status: zod.enum(["pending", "paid", "overdue", "requested"]).optional(),
+  status: zod
+    .enum(["pending", "paid", "overdue", "requested", "current"])
+    .optional(),
   interestRate: zod
     .number()
     .min(createInvoiceBodyInterestRateMin)
@@ -313,7 +315,7 @@ export const GetInvoiceResponse = zod.object({
     .nullish()
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
-  status: zod.enum(["pending", "paid", "overdue", "requested"]),
+  status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
   createdAt: zod.coerce.date(),
@@ -333,7 +335,9 @@ export const updateInvoiceBodyLateFeeMin = 0;
 export const updateInvoiceBodyDaysLateMin = 0;
 
 export const UpdateInvoiceBody = zod.object({
-  status: zod.enum(["pending", "paid", "overdue", "requested"]).optional(),
+  status: zod
+    .enum(["pending", "paid", "overdue", "requested", "current"])
+    .optional(),
   amount: zod.number().optional(),
   dueDate: zod.coerce.date().optional(),
   interestRate: zod.number().min(updateInvoiceBodyInterestRateMin).optional(),
@@ -362,7 +366,7 @@ export const UpdateInvoiceResponse = zod.object({
     .nullish()
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
-  status: zod.enum(["pending", "paid", "overdue", "requested"]),
+  status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod.enum(["weekly", "biweekly", "monthly", "null"]).nullish(),
   createdAt: zod.coerce.date(),

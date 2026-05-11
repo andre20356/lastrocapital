@@ -317,7 +317,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [pending, paid, overdue, requested, all]
+            enum: [pending, paid, overdue, requested, current, all]
         - name: clientId
           in: query
           schema:
@@ -759,7 +759,7 @@ components:
           type: ["number", "null"]
         status:
           type: string
-          enum: [pending, paid, overdue, requested]
+          enum: [pending, paid, overdue, requested, current]
         dueDate:
           type: ["string", "null"]
           format: date
@@ -787,7 +787,7 @@ components:
           enum: [weekly, biweekly, monthly]
         status:
           type: string
-          enum: [pending, paid, overdue, requested]
+          enum: [pending, paid, overdue, requested, current]
         interestRate:
           type: number
           minimum: 0
@@ -806,7 +806,7 @@ components:
       properties:
         status:
           type: string
-          enum: [pending, paid, overdue, requested]
+          enum: [pending, paid, overdue, requested, current]
         amount:
           type: number
         dueDate:
