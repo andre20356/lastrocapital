@@ -806,7 +806,7 @@ export default function Invoices() {
 
       {/* NOVA COBRANÇA — Drawer no mobile, Dialog no desktop */}
       {isMobile ? (
-        <Drawer open={dialogOpen} onOpenChange={(open) => {
+        <Drawer open={dialogOpen} shouldScaleBackground={false} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
         }}>
