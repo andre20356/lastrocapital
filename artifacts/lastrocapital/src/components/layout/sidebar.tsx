@@ -25,10 +25,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   return (
     <aside
       className={[
-        "w-64 border-r border-sidebar-border bg-sidebar flex flex-col",
-        "md:sticky md:top-0 md:h-screen md:translate-x-0 md:flex",
-        "fixed top-0 left-0 h-full z-40 transition-transform duration-300",
-        open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+        "flex flex-col w-64 border-r border-sidebar-border bg-sidebar",
+        "fixed inset-y-0 left-0 z-40 transition-transform duration-300",
+        "md:relative md:inset-y-auto md:left-auto md:h-screen md:translate-x-0 md:shrink-0",
+        open ? "translate-x-0" : "-translate-x-full",
       ].join(" ")}
     >
       <div className="p-6 border-b border-sidebar-border flex items-center justify-between">
