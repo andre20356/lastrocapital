@@ -200,4 +200,14 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+
+  /* Fix: iOS Safari black screen when Radix/vaul modal opens.
+     Radix applies position:fixed + overflow:hidden to lock scroll,
+     but position:fixed causes the page to jump and show a black background.
+     We override to keep the page in place without the jump. */
+  body[data-scroll-locked] {
+    position: static !important;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
 }
