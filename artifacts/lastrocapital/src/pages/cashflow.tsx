@@ -16,7 +16,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useForm } from "react-hook-form";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, TrendingUp, TrendingDown, ArrowRightLeft } from "lucide-react";
+import {
+  Plus, Trash2, ArrowDownLeft, ArrowUpRight, Wallet,
+  TrendingUp, LayoutList, Filter,
+} from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
@@ -27,6 +30,11 @@ interface CashFlowFormData {
   category: string;
   date: string;
 }
+
+const TYPE_LABEL: Record<string, string> = {
+  income: "Recebimento",
+  expense: "Empréstimo",
+};
 
 export default function CashFlow() {
   const queryClient = useQueryClient();
@@ -41,7 +49,7 @@ export default function CashFlow() {
   );
 
   const { data: byCategory } = useGetCashFlowByCategory({
-    query: { queryKey: getGetCashFlowByCategoryQueryKey() }
+    query: { queryKey: getGetCashFlowByCategoryQueryKey() },
   });
 
   const createEntry = useCreateCashFlowEntry();
@@ -59,6 +67,7 @@ export default function CashFlow() {
 
   const totalIncome = entries?.filter((e) => e.type === "income").reduce((s, e) => s + Number(e.amount), 0) ?? 0;
   const totalExpense = entries?.filter((e) => e.type === "expense").reduce((s, e) => s + Number(e.amount), 0) ?? 0;
+  const balance = totalIncome - totalExpense;
 
   const onSubmit = (data: CashFlowFormData) => {
     createEntry.mutate(
@@ -77,7 +86,7 @@ export default function CashFlow() {
           queryClient.invalidateQueries({ queryKey: getGetCashFlowByCategoryQueryKey() });
           setDialogOpen(false);
           form.reset();
-          toast({ title: "Lançamento registrado" });
+          toast({ title: "Movimentação registrada" });
         },
       }
     );
@@ -92,7 +101,7 @@ export default function CashFlow() {
           queryClient.invalidateQueries({ queryKey: getListCashFlowQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetCashFlowByCategoryQueryKey() });
           setDeleteId(null);
-          toast({ title: "Lançamento removido" });
+          toast({ title: "Movimentação removida" });
         },
       }
     );
@@ -100,63 +109,102 @@ export default function CashFlow() {
 
   return (
     <AppLayout>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 md:mb-8">
+      {/* HEADER */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-7">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Fluxo de Caixa</h1>
-          <p className="text-muted-foreground mt-1">Entradas e saídas da empresa</p>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+              <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+            </div>
+            <h1 className="text-2xl font-bold">Movimentação da Carteira</h1>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Controle de recebimentos, empréstimos e saldo operacional
+          </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} data-testid="button-add-entry">
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Lançamento
+        <Button onClick={() => setDialogOpen(true)} data-testid="button-add-entry" className="gap-2">
+          <Plus className="h-4 w-4" />
+          Registrar Movimentação
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <Card>
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-7">
+        {/* Recuperado */}
+        <Card className="border-emerald-500/20 bg-emerald-500/5 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Entradas (filtro)</CardTitle>
-            <TrendingUp className="h-4 w-4 text-emerald-500" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {typeFilter === "expense" ? "Emprestado (filtro)" : "Recuperado"}
+            </CardTitle>
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+              <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-500" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-500">{formatCurrency(totalIncome)}</div>
+            <p className="text-xs text-muted-foreground mt-1">dinheiro que voltou</p>
           </CardContent>
         </Card>
-        <Card>
+
+        {/* Emprestado */}
+        <Card className="border-destructive/20 bg-destructive/5 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Saídas (filtro)</CardTitle>
-            <TrendingDown className="h-4 w-4 text-destructive" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {typeFilter === "income" ? "Recebido (filtro)" : "Emprestado"}
+            </CardTitle>
+            <div className="w-7 h-7 rounded-lg bg-destructive/15 flex items-center justify-center">
+              <ArrowUpRight className="h-3.5 w-3.5 text-destructive" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive">{formatCurrency(totalExpense)}</div>
+            <p className="text-xs text-muted-foreground mt-1">dinheiro na rua</p>
           </CardContent>
         </Card>
-        <Card>
+
+        {/* Resultado */}
+        <Card className={`relative overflow-hidden ${balance >= 0 ? "border-emerald-500/20" : "border-destructive/20"}`}>
+          <div className={`absolute inset-0 bg-gradient-to-br ${balance >= 0 ? "from-emerald-500/5" : "from-destructive/5"} to-transparent pointer-events-none`} />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Saldo (filtro)</CardTitle>
-            <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Resultado Operacional</CardTitle>
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${balance >= 0 ? "bg-emerald-500/15" : "bg-destructive/15"}`}>
+              <TrendingUp className={`h-3.5 w-3.5 ${balance >= 0 ? "text-emerald-500" : "text-destructive"}`} />
+            </div>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalIncome - totalExpense >= 0 ? "text-emerald-500" : "text-destructive"}`}>
-              {formatCurrency(totalIncome - totalExpense)}
+            <div className={`text-2xl font-bold ${balance >= 0 ? "text-emerald-500" : "text-destructive"}`}>
+              {formatCurrency(balance)}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {balance >= 0 ? "saldo positivo" : "saldo negativo"}
+            </p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* TABELA OPERACIONAL */}
         <div className="lg:col-span-2">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">Lançamentos</h2>
-            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as any)}>
-              <SelectTrigger className="w-36" data-testid="select-type-filter">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="income">Entradas</SelectItem>
-                <SelectItem value="expense">Saídas</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <LayoutList className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold">Operações</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+              <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as any)}>
+                <SelectTrigger className="w-40 h-8 text-sm" data-testid="select-type-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os tipos</SelectItem>
+                  <SelectItem value="income">Recebimentos</SelectItem>
+                  <SelectItem value="expense">Empréstimos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {isLoading ? (
@@ -166,41 +214,66 @@ export default function CashFlow() {
           ) : !entries || entries.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center py-12 text-center">
-                <ArrowRightLeft className="h-10 w-10 text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">Nenhum lançamento encontrado</p>
+                <Wallet className="h-10 w-10 text-muted-foreground mb-3 opacity-40" />
+                <p className="font-medium text-muted-foreground">Nenhuma movimentação encontrada</p>
+                <p className="text-sm text-muted-foreground/70 mt-1">Registre um recebimento ou empréstimo para começar</p>
               </CardContent>
             </Card>
           ) : (
-            <Card>
+            <Card className="overflow-hidden">
               <CardContent className="p-0 overflow-x-auto">
                 <table className="w-full min-w-[500px]">
                   <thead>
-                    <tr className="border-b border-border text-left text-sm text-muted-foreground">
-                      <th className="px-6 py-3 font-medium">Data</th>
-                      <th className="px-6 py-3 font-medium">Descrição</th>
-                      <th className="px-6 py-3 font-medium">Categoria</th>
-                      <th className="px-6 py-3 font-medium">Tipo</th>
-                      <th className="px-6 py-3 font-medium text-right">Valor</th>
-                      <th className="px-6 py-3 font-medium text-right">Ação</th>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground bg-muted/30">
+                      <th className="px-5 py-3 font-medium">Data</th>
+                      <th className="px-5 py-3 font-medium">Descrição</th>
+                      <th className="px-5 py-3 font-medium">Categoria</th>
+                      <th className="px-5 py-3 font-medium">Tipo</th>
+                      <th className="px-5 py-3 font-medium text-right">Valor</th>
+                      <th className="px-5 py-3 font-medium text-right">Ação</th>
                     </tr>
                   </thead>
                   <tbody>
                     {entries.map((entry) => (
-                      <tr key={entry.id} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors" data-testid={`row-entry-${entry.id}`}>
-                        <td className="px-6 py-3 text-sm text-muted-foreground">{formatDate(entry.date)}</td>
-                        <td className="px-6 py-3 text-sm">{entry.description ?? "-"}</td>
-                        <td className="px-6 py-3 text-sm text-muted-foreground">{entry.category ?? "-"}</td>
-                        <td className="px-6 py-3">
-                          <Badge variant={entry.type === "income" ? "default" : "destructive"} data-testid={`type-entry-${entry.id}`}>
-                            {entry.type === "income" ? "Entrada" : "Saída"}
-                          </Badge>
+                      <tr
+                        key={entry.id}
+                        className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors group"
+                        data-testid={`row-entry-${entry.id}`}
+                      >
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+                          {formatDate(entry.date)}
                         </td>
-                        <td className={`px-6 py-3 text-right font-semibold ${entry.type === "income" ? "text-emerald-500" : "text-destructive"}`}>
+                        <td className="px-5 py-3.5 text-sm font-medium">
+                          {entry.description ?? <span className="text-muted-foreground/50">—</span>}
+                        </td>
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                          {entry.category ?? <span className="opacity-40">—</span>}
+                        </td>
+                        <td className="px-5 py-3.5" data-testid={`type-entry-${entry.id}`}>
+                          {entry.type === "income" ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/25">
+                              <ArrowDownLeft className="h-3 w-3" />
+                              Recebimento
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/25">
+                              <ArrowUpRight className="h-3 w-3" />
+                              Empréstimo
+                            </span>
+                          )}
+                        </td>
+                        <td className={`px-5 py-3.5 text-right font-bold tabular-nums whitespace-nowrap ${entry.type === "income" ? "text-emerald-500" : "text-destructive"}`}>
                           {entry.type === "expense" ? "-" : "+"}{formatCurrency(Number(entry.amount))}
                         </td>
-                        <td className="px-6 py-3 text-right">
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteId(entry.id)} data-testid={`button-delete-entry-${entry.id}`}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                        <td className="px-5 py-3.5 text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => setDeleteId(entry.id)}
+                            data-testid={`button-delete-entry-${entry.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </td>
                       </tr>
@@ -212,22 +285,31 @@ export default function CashFlow() {
           )}
         </div>
 
+        {/* POR OPERAÇÃO */}
         <div>
-          <h2 className="text-lg font-semibold mb-4">Por Categoria</h2>
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">Por Categoria</h2>
+          </div>
           <Card>
-            <CardContent className="p-4 space-y-3">
+            <CardContent className="p-4 space-y-1">
               {!byCategory || byCategory.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">Sem dados</p>
+                <p className="text-sm text-muted-foreground text-center py-6 opacity-60">Sem movimentações</p>
               ) : (
                 byCategory.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                  <div
+                    key={i}
+                    className="flex items-center justify-between py-2.5 border-b border-border last:border-0"
+                  >
                     <div>
                       <p className="text-sm font-medium">{item.category ?? "Sem categoria"}</p>
-                      <Badge variant={item.type === "income" ? "default" : "destructive"} className="text-xs mt-1">
-                        {item.type === "income" ? "Entrada" : "Saída"}
-                      </Badge>
+                      <span className={`inline-flex items-center gap-1 text-xs mt-0.5 ${item.type === "income" ? "text-emerald-500" : "text-destructive"}`}>
+                        {item.type === "income"
+                          ? <><ArrowDownLeft className="h-3 w-3" /> Recebimento</>
+                          : <><ArrowUpRight className="h-3 w-3" /> Empréstimo</>}
+                      </span>
                     </div>
-                    <span className={`font-semibold ${item.type === "income" ? "text-emerald-500" : "text-destructive"}`}>
+                    <span className={`font-bold tabular-nums ${item.type === "income" ? "text-emerald-500" : "text-destructive"}`}>
                       {formatCurrency(Number(item.total))}
                     </span>
                   </div>
@@ -238,21 +320,22 @@ export default function CashFlow() {
         </div>
       </div>
 
+      {/* DIALOG — Registrar */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Novo Lançamento</DialogTitle>
+            <DialogTitle>Registrar Movimentação</DialogTitle>
           </DialogHeader>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <div>
-              <Label>Tipo</Label>
+              <Label>Tipo de operação</Label>
               <Select value={form.watch("type")} onValueChange={(v) => form.setValue("type", v as any)}>
                 <SelectTrigger data-testid="select-entry-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="income">Entrada</SelectItem>
-                  <SelectItem value="expense">Saída</SelectItem>
+                  <SelectItem value="income">Recebimento (dinheiro que voltou)</SelectItem>
+                  <SelectItem value="expense">Empréstimo (dinheiro que saiu)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -262,11 +345,11 @@ export default function CashFlow() {
             </div>
             <div>
               <Label htmlFor="description">Descrição</Label>
-              <Input id="description" {...form.register("description")} data-testid="input-entry-description" />
+              <Input id="description" placeholder="Ex: Pagamento parcela 3/12 — João Silva" {...form.register("description")} data-testid="input-entry-description" />
             </div>
             <div>
               <Label htmlFor="category">Categoria</Label>
-              <Input id="category" placeholder="Ex: Vendas, Aluguel, Salários..." {...form.register("category")} data-testid="input-entry-category" />
+              <Input id="category" placeholder="Ex: Parcela, Juros, Multa, Novo contrato..." {...form.register("category")} data-testid="input-entry-category" />
             </div>
             <div>
               <Label htmlFor="date">Data</Label>
@@ -280,10 +363,11 @@ export default function CashFlow() {
         </DialogContent>
       </Dialog>
 
+      {/* ALERT — Confirmar exclusão */}
       <AlertDialog open={deleteId !== null} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover lançamento?</AlertDialogTitle>
+            <AlertDialogTitle>Remover movimentação?</AlertDialogTitle>
             <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
