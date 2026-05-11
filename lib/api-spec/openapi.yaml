@@ -765,7 +765,7 @@ components:
           format: date
         recurrence:
           type: ["string", "null"]
-          enum: [weekly, biweekly, monthly, "null"]
+          enum: [daily, weekly, biweekly, monthly, "null"]
         createdAt:
           type: string
           format: date-time
@@ -784,7 +784,7 @@ components:
           format: date
         recurrence:
           type: string
-          enum: [weekly, biweekly, monthly]
+          enum: [daily, weekly, biweekly, monthly]
         status:
           type: string
           enum: [pending, paid, overdue, requested, current]
