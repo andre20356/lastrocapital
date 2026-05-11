@@ -98,6 +98,21 @@ export default function Dashboard() {
     })
     .slice(0, 8);
 
+  // Saldo Líquido = soma dos juros efetivamente pagos no mês atual
+  const nowDash = new Date();
+  const thisMonthDash = nowDash.getMonth();
+  const thisYearDash = nowDash.getFullYear();
+  const jurosPagosMes = (invoicesRaw ?? [])
+    .filter((inv: Invoice) => {
+      if (inv.status !== "paid") return false;
+      if (!inv.dueDate) return true;
+      const due = new Date(inv.dueDate + "T00:00:00");
+      return due.getMonth() === thisMonthDash && due.getFullYear() === thisYearDash;
+    })
+    .reduce((sum: number, inv: Invoice) => {
+      return sum + ((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100;
+    }, 0);
+
   const formattedDaily = (dailyData ?? []).map((d) => ({
     ...d,
     dateLabel: new Intl.DateTimeFormat("pt-BR", {
@@ -208,7 +223,7 @@ export default function Dashboard() {
               <p className="text-xs text-red-400/60 mt-1">dívidas vencidas e não pagas</p>
             </div>
 
-            {/* Lucro do Mês */}
+            {/* Saldo Líquido */}
             <div className="bg-gradient-to-br from-emerald-950/40 to-background border border-emerald-500/20 rounded-2xl p-5 hover:border-emerald-500/40 transition-all group">
               <div className="flex items-start justify-between mb-4">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/20 transition-all">
@@ -219,12 +234,10 @@ export default function Dashboard() {
                 </span>
               </div>
               <p className="text-muted-foreground text-xs mb-1">Saldo Líquido</p>
-              <p
-                className={`text-xl md:text-2xl font-bold ${summary.netBalance >= 0 ? "text-foreground" : "text-red-300"}`}
-              >
-                {formatCurrency(summary.netBalance)}
+              <p className="text-xl md:text-2xl font-bold text-emerald-400">
+                {formatCurrency(jurosPagosMes)}
               </p>
-              <p className="text-xs text-muted-foreground/60 mt-1">entradas menos saídas</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">juros recebidos este mês</p>
             </div>
           </div>
         )}
