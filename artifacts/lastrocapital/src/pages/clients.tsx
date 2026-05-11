@@ -218,9 +218,9 @@ export default function Clients() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 md:mb-8">
         <div>
-          <h1 className="text-3xl font-bold">Clientes</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Clientes</h1>
           <p className="text-muted-foreground mt-1">Gerencie sua base de clientes</p>
         </div>
         <div className="flex gap-2">
@@ -274,8 +274,8 @@ export default function Clients() {
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-0">
-            <table className="w-full">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b border-border text-left text-sm text-muted-foreground">
                   <th className="px-6 py-4 font-medium">Nome</th>

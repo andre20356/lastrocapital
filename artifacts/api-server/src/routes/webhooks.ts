@@ -30,7 +30,7 @@ router.post("/webhooks/abacatepay", async (req, res): Promise<void> => {
     event?: string;
     data?: {
       pixQrCode?: { id?: string };
-      billing?: { id?: string; externalId?: string };
+      billing?: { id?: string; externalId?: string; expiresAt?: string };
       subscription?: { id?: string; expiresAt?: string; nextBillingAt?: string };
     };
   };

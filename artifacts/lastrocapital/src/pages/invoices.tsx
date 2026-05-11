@@ -16,12 +16,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useForm, useWatch } from "react-hook-form";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, CheckCircle, AlertCircle, FileText, Banknote, Calculator, BadgeCheck } from "lucide-react";
+import { Plus, Trash2, CheckCircle, AlertCircle, FileText, Banknote, Calculator, BadgeCheck, Pencil } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { getGetDashboardSummaryQueryKey, getListCashFlowQueryKey } from "@workspace/api-client-react";
 
-type InvoiceStatus = "pending" | "paid" | "overdue" | "requested";
+type InvoiceStatus = "pending" | "paid" | "overdue" | "requested" | "current";
 
 interface InvoiceFormData {
   clientId: string;
@@ -34,11 +34,12 @@ interface InvoiceFormData {
   daysLate: string;
 }
 
-const statusConfig: Record<InvoiceStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+const statusConfig: Record<InvoiceStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className?: string }> = {
   pending: { label: "Pendente", variant: "secondary" },
   paid: { label: "Pago", variant: "default" },
   overdue: { label: "Vencido", variant: "destructive" },
   requested: { label: "Solicitação", variant: "outline" },
+  current: { label: "Em Dia", variant: "outline", className: "border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" },
 };
 
 interface Breakdown {
@@ -90,6 +91,11 @@ export default function Invoices() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [payInterestId, setPayInterestId] = useState<number | null>(null);
   const [quitacaoId, setQuitacaoId] = useState<number | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<{ id: number; clientId: number; clientName?: string | null; amount?: number | null; dueDate?: string | null; recurrence?: string | null; status: string; interestRate?: number | null; lateFee?: number | null; daysLate?: number | null } | null>(null);
+
+  const editForm = useForm<InvoiceFormData>({
+    defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0" },
+  });
 
   // Loan calculator state
   const [loanTotal, setLoanTotal] = useState("");
@@ -228,6 +234,49 @@ export default function Invoices() {
     );
   };
 
+  const openEditDialog = (inv: NonNullable<typeof editingInvoice>) => {
+    setEditingInvoice(inv);
+    editForm.reset({
+      clientId: String(inv.clientId),
+      amount: inv.amount != null ? String(inv.amount).replace(".", ",") : "",
+      dueDate: inv.dueDate ? inv.dueDate.slice(0, 10) : "",
+      recurrence: inv.recurrence ?? "none",
+      status: inv.status as InvoiceStatus,
+      interestRate: inv.interestRate != null ? String(inv.interestRate) : "0",
+      lateFee: inv.lateFee != null ? String(inv.lateFee).replace(".", ",") : "0",
+      daysLate: inv.daysLate != null ? String(inv.daysLate) : "0",
+    });
+  };
+
+  const onEditSubmit = (data: InvoiceFormData) => {
+    if (!editingInvoice) return;
+    updateInvoice.mutate(
+      {
+        id: editingInvoice.id,
+        data: {
+          amount: data.amount ? parseBRL(data.amount) : undefined,
+          dueDate: data.dueDate || undefined,
+          status: data.status as InvoiceStatus,
+          interestRate: parseFloat(data.interestRate) || 0,
+          lateFee: parseBRL(data.lateFee) || 0,
+          daysLate: parseInt(data.daysLate) || 0,
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListInvoicesQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+          setEditingInvoice(null);
+          toast({ title: "Cobrança atualizada" });
+        },
+        onError: (err: any) => {
+          const msg = err?.response?.data?.error ?? "Erro ao atualizar cobrança. Tente novamente.";
+          toast({ title: "Erro ao atualizar cobrança", description: msg, variant: "destructive" });
+        },
+      }
+    );
+  };
+
   const confirmDelete = () => {
     if (deleteId === null) return;
     deleteInvoice.mutate(
@@ -258,9 +307,9 @@ export default function Invoices() {
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 md:mb-8">
         <div>
-          <h1 className="text-3xl font-bold">Cobranças</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Cobranças</h1>
           <p className="text-muted-foreground mt-1">Gerencie suas cobranças e faturas</p>
         </div>
         <Button onClick={() => setDialogOpen(true)} data-testid="button-add-invoice">
@@ -270,7 +319,7 @@ export default function Invoices() {
       </div>
 
       <div className="flex gap-3 mb-6">
-        {(["all", "pending", "paid", "overdue", "requested"] as const).map((s) => (
+        {(["all", "pending", "paid", "overdue", "requested", "current"] as const).map((s) => (
           <Button
             key={s}
             variant={statusFilter === s ? "default" : "outline"}
@@ -297,8 +346,8 @@ export default function Invoices() {
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-0">
-            <table className="w-full">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full min-w-[700px]">
               <thead>
                 <tr className="border-b border-border text-left text-sm text-muted-foreground">
                   <th className="px-6 py-4 font-medium">Cliente</th>
@@ -368,7 +417,11 @@ export default function Invoices() {
                           : "-"}
                       </td>
                       <td className="px-6 py-4">
-                        <Badge variant={statusConfig[inv.status as InvoiceStatus]?.variant ?? "secondary"} data-testid={`status-invoice-${inv.id}`}>
+                        <Badge
+                          variant={statusConfig[inv.status as InvoiceStatus]?.variant ?? "secondary"}
+                          className={statusConfig[inv.status as InvoiceStatus]?.className}
+                          data-testid={`status-invoice-${inv.id}`}
+                        >
                           {statusConfig[inv.status as InvoiceStatus]?.label ?? inv.status}
                         </Badge>
                       </td>
@@ -405,6 +458,9 @@ export default function Invoices() {
                               <AlertCircle className="h-4 w-4 text-destructive" />
                             </Button>
                           )}
+                          <Button variant="ghost" size="icon" title="Editar cobrança" onClick={() => openEditDialog(inv as any)} data-testid={`button-edit-invoice-${inv.id}`}>
+                            <Pencil className="h-4 w-4 text-muted-foreground" />
+                          </Button>
                           <Button variant="ghost" size="icon" onClick={() => setDeleteId(inv.id)} data-testid={`button-delete-invoice-${inv.id}`}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
@@ -525,7 +581,7 @@ export default function Invoices() {
                 <SelectTrigger data-testid="select-invoice-client" className={form.formState.errors.clientId ? "border-destructive" : ""}>
                   <SelectValue placeholder="Selecione um cliente" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-60 overflow-y-auto">
                   {clients?.map((c) => (
                     <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
                   ))}
@@ -621,6 +677,7 @@ export default function Invoices() {
                   <SelectItem value="paid">Pago</SelectItem>
                   <SelectItem value="overdue">Vencido</SelectItem>
                   <SelectItem value="requested">Solicitação</SelectItem>
+                  <SelectItem value="current">Em Dia</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -676,6 +733,95 @@ export default function Invoices() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit invoice dialog */}
+      <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Cobrança</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+            <div>
+              <Label>Cliente *</Label>
+              <Select
+                value={editForm.watch("clientId")}
+                onValueChange={(v) => { editForm.setValue("clientId", v); editForm.clearErrors("clientId"); }}
+              >
+                <SelectTrigger data-testid="select-edit-invoice-client">
+                  <SelectValue placeholder="Selecione um cliente" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 overflow-y-auto">
+                  {clients?.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="edit-inv-amount">Valor Principal (R$)</Label>
+              <Input id="edit-inv-amount" placeholder="0,00" {...editForm.register("amount")} data-testid="input-edit-invoice-amount" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="edit-inv-interest">Juros (%)</Label>
+                <Input id="edit-inv-interest" type="number" min="0" step="0.01" placeholder="0" {...editForm.register("interestRate")} data-testid="input-edit-invoice-interest" />
+              </div>
+              <div>
+                <Label htmlFor="edit-inv-latefee">Multa por dia (R$)</Label>
+                <Input id="edit-inv-latefee" placeholder="0,00" {...editForm.register("lateFee")} data-testid="input-edit-invoice-latefee" />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="edit-inv-days">Dias de Atraso</Label>
+              <Input id="edit-inv-days" type="number" min="0" step="1" placeholder="0" {...editForm.register("daysLate")} data-testid="input-edit-invoice-days-late" />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-inv-due">Data de Vencimento</Label>
+              <Input id="edit-inv-due" type="date" {...editForm.register("dueDate")} data-testid="input-edit-invoice-due" />
+            </div>
+
+            <div>
+              <Label>Recorrência</Label>
+              <Select value={editForm.watch("recurrence")} onValueChange={(v) => editForm.setValue("recurrence", v)}>
+                <SelectTrigger data-testid="select-edit-invoice-recurrence">
+                  <SelectValue placeholder="Sem recorrência" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem recorrência</SelectItem>
+                  <SelectItem value="weekly">Semanal</SelectItem>
+                  <SelectItem value="biweekly">Quinzenal</SelectItem>
+                  <SelectItem value="monthly">Mensal</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Status</Label>
+              <Select value={editForm.watch("status")} onValueChange={(v) => editForm.setValue("status", v as InvoiceStatus)}>
+                <SelectTrigger data-testid="select-edit-invoice-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pendente</SelectItem>
+                  <SelectItem value="paid">Pago</SelectItem>
+                  <SelectItem value="overdue">Vencido</SelectItem>
+                  <SelectItem value="requested">Solicitação</SelectItem>
+                  <SelectItem value="current">Em Dia</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingInvoice(null)}>Cancelar</Button>
+              <Button type="submit" disabled={updateInvoice.isPending} data-testid="button-submit-edit-invoice">Salvar</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleteId !== null} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>

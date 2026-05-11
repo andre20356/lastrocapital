@@ -156,16 +156,16 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
     return;
   }
 
-  // If paying interest, fetch the invoice first to calculate the interest amount
+  // Fetch the current invoice before updating (needed for cashflow and interest calculations)
+  const [existingInvoice] = await db
+    .select()
+    .from(invoicesTable)
+    .where(and(eq(invoicesTable.id, params.data.id), eq(invoicesTable.companyId, req.companyId)));
+
+  // If paying interest, calculate the interest amount
   let interestAmountPaid = 0;
-  if (parsed.data.interestPaid === true) {
-    const [existing] = await db
-      .select()
-      .from(invoicesTable)
-      .where(and(eq(invoicesTable.id, params.data.id), eq(invoicesTable.companyId, req.companyId)));
-    if (existing && !existing.interestPaid) {
-      interestAmountPaid = calculateInterestOnly(existing);
-    }
+  if (parsed.data.interestPaid === true && existingInvoice && !existingInvoice.interestPaid) {
+    interestAmountPaid = calculateInterestOnly(existingInvoice);
   }
 
   const updateData: any = {};
@@ -221,7 +221,24 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
     });
   }
 
+  // When invoice is marked as paid (quitação), record the principal as cashflow income
+  const wasNotPaid = existingInvoice && existingInvoice.status !== "paid";
   const [clientRow] = await db.select().from(clientsTable).where(eq(clientsTable.id, invoice.clientId));
+  if (parsed.data.status === "paid" && wasNotPaid) {
+    const principal = existingInvoice.amount != null ? parseFloat(existingInvoice.amount) : 0;
+    const clientName = clientRow?.name ?? `Cliente #${invoice.clientId}`;
+    if (principal > 0) {
+      await db.insert(cashFlowTable).values({
+        companyId: req.companyId,
+        type: "income",
+        amount: String(principal.toFixed(2)),
+        description: `Quitação — ${clientName} (Cobrança #${invoice.id})`,
+        category: "cobranças",
+        date: new Date(),
+      });
+    }
+  }
+
   res.json(formatInvoice(invoice, clientRow?.name));
 });
 
