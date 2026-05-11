@@ -1,10 +1,17 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { Sidebar } from "./sidebar";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [location] = useLocation();
+
+  // Fecha a sidebar automaticamente ao navegar (resolve overlay preso no mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location]);
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
