@@ -197,14 +197,23 @@
     @apply border-border;
   }
 
-  body {
-    @apply font-sans antialiased bg-background text-foreground;
+  /* Garante que html e body nunca mostrem fundo preto no iOS Safari.
+     Sem isso, qualquer repaint (toque, teclado, scroll) mostra o fundo
+     preto da WKWebView antes de pintar o conteúdo. */
+  html {
+    @apply bg-background;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  /* Fix: iOS Safari black screen when Radix/vaul modal opens.
-     Radix applies position:fixed + overflow:hidden to lock scroll,
-     but position:fixed causes the page to jump and show a black background.
-     We override to keep the page in place without the jump. */
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    overscroll-behavior: none;
+  }
+
+  /* Fix: Radix aplica position:fixed no body para travar scroll em modais.
+     No iOS isso faz a página "pular" expondo o fundo preto do navegador.
+     Forçamos position:static mantendo apenas overflow:hidden. */
   body[data-scroll-locked] {
     position: static !important;
     overflow: hidden !important;
