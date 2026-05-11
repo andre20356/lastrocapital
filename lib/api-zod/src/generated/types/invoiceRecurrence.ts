@@ -14,6 +14,7 @@ export type InvoiceRecurrence =
   | null;
 
 export const InvoiceRecurrence = {
+  daily: "daily",
   weekly: "weekly",
   biweekly: "biweekly",
   monthly: "monthly",
