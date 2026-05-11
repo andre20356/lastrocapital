@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "@/components/ui/drawer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useForm, useWatch } from "react-hook-form";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus, Trash2, CheckCircle2, AlertCircle, FileText,
@@ -97,6 +99,7 @@ function calcularEmprestimoSemanal(valorTotal: number, numeroParcelas: number, t
 }
 
 export default function Invoices() {
+  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
@@ -154,6 +157,177 @@ export default function Invoices() {
     form.setValue("amount", loanCalc.parcela.toFixed(2).replace(".", ","));
     toast({ title: "Valor da parcela aplicado", description: `${formatCurrency(loanCalc.parcela)} por semana` });
   };
+
+  const invoiceFormFields = () => (
+    <>
+      <div>
+        <Label>Recorrência</Label>
+        <Select value={watchedRecurrence} onValueChange={(v) => form.setValue("recurrence", v)}>
+          <SelectTrigger data-testid="select-invoice-recurrence">
+            <SelectValue placeholder="Sem recorrência" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Sem recorrência</SelectItem>
+            <SelectItem value="weekly">Semanal</SelectItem>
+            <SelectItem value="biweekly">Quinzenal</SelectItem>
+            <SelectItem value="monthly">Mensal</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-500">
+            <Calculator className="h-4 w-4" />
+            {watchedRecurrence === "weekly" ? "Calculadora de Empréstimo Semanal" : "Calculadora de Empréstimo Quinzenal"}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Valor Total (R$)</Label>
+              <Input placeholder="0,00" value={loanTotal} onChange={(e) => setLoanTotal(e.target.value)} data-testid="input-loan-total" />
+            </div>
+            <div>
+              <Label className="text-xs">Nº de Parcelas</Label>
+              <Input type="number" min="1" placeholder="ex: 10" value={loanParcelas} onChange={(e) => setLoanParcelas(e.target.value)} data-testid="input-loan-parcelas" />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Taxa usada: <strong>{watchedInterest || "0"}%</strong> — defina no campo Juros (%) abaixo
+          </p>
+          {loanCalc && (
+            <div className="rounded-md border border-border bg-background divide-y divide-border overflow-hidden text-sm">
+              <div className="flex justify-between items-center px-3 py-2">
+                <span className="text-muted-foreground">{watchedRecurrence === "weekly" ? "Parcela semanal" : "Parcela quinzenal"}</span>
+                <span className="font-bold text-amber-500">{formatCurrency(loanCalc.parcela)}</span>
+              </div>
+              <div className="flex justify-between items-center px-3 py-2">
+                <span className="text-muted-foreground">Juros total</span>
+                <span className="font-medium">{formatCurrency(loanCalc.jurosTotal)}</span>
+              </div>
+              <div className="flex justify-between items-center px-3 py-2">
+                <span className="text-muted-foreground">Total a receber</span>
+                <span className="font-semibold">{formatCurrency(loanCalc.total)}</span>
+              </div>
+            </div>
+          )}
+          {loanCalc && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
+              onClick={applyLoanCalc}
+              data-testid="button-apply-loan-calc"
+            >
+              Usar {formatCurrency(loanCalc.parcela)} como valor da parcela
+            </Button>
+          )}
+        </div>
+      )}
+
+      <div>
+        <Label>Cliente *</Label>
+        <Select
+          value={form.watch("clientId")}
+          onValueChange={(v) => { form.setValue("clientId", v); form.clearErrors("clientId"); }}
+        >
+          <SelectTrigger data-testid="select-invoice-client" className={form.formState.errors.clientId ? "border-destructive" : ""}>
+            <SelectValue placeholder="Selecione um cliente" />
+          </SelectTrigger>
+          <SelectContent className="max-h-60 overflow-y-auto">
+            {clients?.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {form.formState.errors.clientId && (
+          <p className="text-xs text-destructive mt-1">{form.formState.errors.clientId.message}</p>
+        )}
+      </div>
+
+      <div>
+        <Label htmlFor="inv-amount">
+          {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") ? "Valor da Parcela (R$)" : "Valor Principal (R$)"}
+        </Label>
+        <Input id="inv-amount" placeholder="0,00" {...form.register("amount")} data-testid="input-invoice-amount" />
+        {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
+          <p className="text-xs text-muted-foreground mt-1">Use a calculadora acima para preencher automaticamente</p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="inv-interest">
+            Juros (%)
+            {watchedRecurrence === "weekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa semanal</span>}
+            {watchedRecurrence === "biweekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa quinzenal</span>}
+          </Label>
+          <Input id="inv-interest" type="number" min="0" step="0.01" placeholder="0" {...form.register("interestRate")} data-testid="input-invoice-interest" />
+          <p className="text-xs text-muted-foreground mt-1">
+            {watchedRecurrence === "weekly" ? "taxa semanal usada na calculadora" : watchedRecurrence === "biweekly" ? "taxa quinzenal usada na calculadora" : "% sobre o principal"}
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="inv-latefee">Multa por dia (R$)</Label>
+          <Input id="inv-latefee" placeholder="0,00" {...form.register("lateFee")} data-testid="input-invoice-latefee" />
+          <p className="text-xs text-muted-foreground mt-1">valor fixo/dia de atraso</p>
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor="inv-days">Dias de Atraso</Label>
+        <Input id="inv-days" type="number" min="0" step="1" placeholder="0" {...form.register("daysLate")} data-testid="input-invoice-days-late" />
+      </div>
+
+      {breakdown && breakdown.principal > 0 && (
+        <div className="rounded-lg border border-border bg-muted/40 divide-y divide-border overflow-hidden">
+          <div className="flex justify-between items-center px-4 py-2 text-sm">
+            <span className="text-muted-foreground">Principal</span>
+            <span className="font-medium tabular-nums">{formatCurrency(breakdown.principal)}</span>
+          </div>
+          {breakdown.interestAmount > 0 && (
+            <div className="flex justify-between items-center px-4 py-2 text-sm">
+              <span className="text-muted-foreground">Juros ({watchedInterest}% × {formatCurrency(breakdown.principal)})</span>
+              <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.interestAmount)}</span>
+            </div>
+          )}
+          {breakdown.lateFeeTotal > 0 && (
+            <div className="flex justify-between items-center px-4 py-2 text-sm">
+              <span className="text-muted-foreground">Multa ({watchedDays} dia(s) × {formatCurrency(parseFloat(watchedLateFee.replace(",", ".")) || 0)})</span>
+              <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.lateFeeTotal)}</span>
+            </div>
+          )}
+          <div className="flex justify-between items-center px-4 py-3 bg-muted/60">
+            <span className="text-sm font-semibold">Total a pagar</span>
+            <span className={`font-bold text-base tabular-nums ${hasEncargos ? "text-destructive" : "text-foreground"}`}>
+              {formatCurrency(breakdown.total)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <Label htmlFor="inv-due">Data de Vencimento</Label>
+        <Input id="inv-due" type="date" {...form.register("dueDate")} data-testid="input-invoice-due" />
+      </div>
+
+      <div>
+        <Label>Status inicial</Label>
+        <Select value={form.watch("status")} onValueChange={(v) => form.setValue("status", v as InvoiceStatus)}>
+          <SelectTrigger data-testid="select-invoice-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pending">Pendente</SelectItem>
+            <SelectItem value="paid">Pago</SelectItem>
+            <SelectItem value="overdue">Vencido</SelectItem>
+            <SelectItem value="requested">Solicitação</SelectItem>
+            <SelectItem value="current">Em Dia</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </>
+  );
 
   const onSubmit = (data: InvoiceFormData) => {
     const clientId = parseInt(data.clientId);
@@ -630,193 +804,46 @@ export default function Invoices() {
         </Card>
       )}
 
-      {/* DIALOG — Nova cobrança */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => {
-        setDialogOpen(open);
-        if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
-      }}>
-        <DialogContent
-          className="max-h-[90dvh] overflow-y-auto overscroll-contain w-[95vw] sm:w-full sm:max-w-lg"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-        >
-          <DialogHeader>
-            <DialogTitle>Nova Cobrança</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <Label>Recorrência</Label>
-              <Select value={watchedRecurrence} onValueChange={(v) => form.setValue("recurrence", v)}>
-                <SelectTrigger data-testid="select-invoice-recurrence">
-                  <SelectValue placeholder="Sem recorrência" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sem recorrência</SelectItem>
-                  <SelectItem value="weekly">Semanal</SelectItem>
-                  <SelectItem value="biweekly">Quinzenal</SelectItem>
-                  <SelectItem value="monthly">Mensal</SelectItem>
-                </SelectContent>
-              </Select>
+      {/* NOVA COBRANÇA — Drawer no mobile, Dialog no desktop */}
+      {isMobile ? (
+        <Drawer open={dialogOpen} onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
+        }}>
+          <DrawerContent className="max-h-[92dvh] flex flex-col">
+            <DrawerHeader className="text-left pb-2">
+              <DrawerTitle>Nova Cobrança</DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 pb-2">
+              <form id="nova-cobranca-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                {invoiceFormFields()}
+              </form>
             </div>
-
-            {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-amber-500">
-                  <Calculator className="h-4 w-4" />
-                  {watchedRecurrence === "weekly" ? "Calculadora de Empréstimo Semanal" : "Calculadora de Empréstimo Quinzenal"}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Valor Total (R$)</Label>
-                    <Input placeholder="0,00" value={loanTotal} onChange={(e) => setLoanTotal(e.target.value)} data-testid="input-loan-total" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Nº de Parcelas</Label>
-                    <Input type="number" min="1" placeholder="ex: 10" value={loanParcelas} onChange={(e) => setLoanParcelas(e.target.value)} data-testid="input-loan-parcelas" />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Taxa usada: <strong>{watchedInterest || "0"}%</strong> — defina no campo Juros (%) abaixo
-                </p>
-                {loanCalc && (
-                  <div className="rounded-md border border-border bg-background divide-y divide-border overflow-hidden text-sm">
-                    <div className="flex justify-between items-center px-3 py-2">
-                      <span className="text-muted-foreground">{watchedRecurrence === "weekly" ? "Parcela semanal" : "Parcela quinzenal"}</span>
-                      <span className="font-bold text-amber-500">{formatCurrency(loanCalc.parcela)}</span>
-                    </div>
-                    <div className="flex justify-between items-center px-3 py-2">
-                      <span className="text-muted-foreground">Juros total</span>
-                      <span className="font-medium">{formatCurrency(loanCalc.jurosTotal)}</span>
-                    </div>
-                    <div className="flex justify-between items-center px-3 py-2">
-                      <span className="text-muted-foreground">Total a receber</span>
-                      <span className="font-semibold">{formatCurrency(loanCalc.total)}</span>
-                    </div>
-                  </div>
-                )}
-                {loanCalc && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="w-full border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
-                    onClick={applyLoanCalc}
-                    data-testid="button-apply-loan-calc"
-                  >
-                    Usar {formatCurrency(loanCalc.parcela)} como valor da parcela
-                  </Button>
-                )}
-              </div>
-            )}
-
-            <div>
-              <Label>Cliente *</Label>
-              <Select
-                value={form.watch("clientId")}
-                onValueChange={(v) => { form.setValue("clientId", v); form.clearErrors("clientId"); }}
-              >
-                <SelectTrigger data-testid="select-invoice-client" className={form.formState.errors.clientId ? "border-destructive" : ""}>
-                  <SelectValue placeholder="Selecione um cliente" />
-                </SelectTrigger>
-                <SelectContent className="max-h-60 overflow-y-auto">
-                  {clients?.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.clientId && (
-                <p className="text-xs text-destructive mt-1">{form.formState.errors.clientId.message}</p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="inv-amount">
-                {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") ? "Valor da Parcela (R$)" : "Valor Principal (R$)"}
-              </Label>
-              <Input id="inv-amount" placeholder="0,00" {...form.register("amount")} data-testid="input-invoice-amount" />
-              {(watchedRecurrence === "weekly" || watchedRecurrence === "biweekly") && (
-                <p className="text-xs text-muted-foreground mt-1">Use a calculadora acima para preencher automaticamente</p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="inv-interest">
-                  Juros (%)
-                  {watchedRecurrence === "weekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa semanal</span>}
-                  {watchedRecurrence === "biweekly" && <span className="ml-1 text-xs font-normal text-amber-500">= taxa quinzenal</span>}
-                </Label>
-                <Input id="inv-interest" type="number" min="0" step="0.01" placeholder="0" {...form.register("interestRate")} data-testid="input-invoice-interest" />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {watchedRecurrence === "weekly" ? "taxa semanal usada na calculadora" : watchedRecurrence === "biweekly" ? "taxa quinzenal usada na calculadora" : "% sobre o principal"}
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="inv-latefee">Multa por dia (R$)</Label>
-                <Input id="inv-latefee" placeholder="0,00" {...form.register("lateFee")} data-testid="input-invoice-latefee" />
-                <p className="text-xs text-muted-foreground mt-1">valor fixo/dia de atraso</p>
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="inv-days">Dias de Atraso</Label>
-              <Input id="inv-days" type="number" min="0" step="1" placeholder="0" {...form.register("daysLate")} data-testid="input-invoice-days-late" />
-            </div>
-
-            {breakdown && breakdown.principal > 0 && (
-              <div className="rounded-lg border border-border bg-muted/40 divide-y divide-border overflow-hidden">
-                <div className="flex justify-between items-center px-4 py-2 text-sm">
-                  <span className="text-muted-foreground">Principal</span>
-                  <span className="font-medium tabular-nums">{formatCurrency(breakdown.principal)}</span>
-                </div>
-                {breakdown.interestAmount > 0 && (
-                  <div className="flex justify-between items-center px-4 py-2 text-sm">
-                    <span className="text-muted-foreground">Juros ({watchedInterest}% × {formatCurrency(breakdown.principal)})</span>
-                    <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.interestAmount)}</span>
-                  </div>
-                )}
-                {breakdown.lateFeeTotal > 0 && (
-                  <div className="flex justify-between items-center px-4 py-2 text-sm">
-                    <span className="text-muted-foreground">Multa ({watchedDays} dia(s) × {formatCurrency(parseFloat(watchedLateFee.replace(",", ".")) || 0)})</span>
-                    <span className="font-medium text-amber-400 tabular-nums">+ {formatCurrency(breakdown.lateFeeTotal)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center px-4 py-3 bg-muted/60">
-                  <span className="text-sm font-semibold">Total a pagar</span>
-                  <span className={`font-bold text-base tabular-nums ${hasEncargos ? "text-destructive" : "text-foreground"}`}>
-                    {formatCurrency(breakdown.total)}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <Label htmlFor="inv-due">Data de Vencimento</Label>
-              <Input id="inv-due" type="date" {...form.register("dueDate")} data-testid="input-invoice-due" />
-            </div>
-
-            <div>
-              <Label>Status inicial</Label>
-              <Select value={form.watch("status")} onValueChange={(v) => form.setValue("status", v as InvoiceStatus)}>
-                <SelectTrigger data-testid="select-invoice-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pendente</SelectItem>
-                  <SelectItem value="paid">Pago</SelectItem>
-                  <SelectItem value="overdue">Vencido</SelectItem>
-                  <SelectItem value="requested">Solicitação</SelectItem>
-                  <SelectItem value="current">Em Dia</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <DialogFooter>
+            <DrawerFooter className="pt-2">
+              <Button form="nova-cobranca-form" type="submit" disabled={createInvoice.isPending} data-testid="button-submit-invoice">Registrar</Button>
               <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); form.reset(); }}>Cancelar</Button>
-              <Button type="submit" disabled={createInvoice.isPending} data-testid="button-submit-invoice">Registrar</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+            </DrawerFooter>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={dialogOpen} onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) { form.reset(); setLoanTotal(""); setLoanParcelas(""); }
+        }}>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto overscroll-contain sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Nova Cobrança</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              {invoiceFormFields()}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); form.reset(); }}>Cancelar</Button>
+                <Button type="submit" disabled={createInvoice.isPending} data-testid="button-submit-invoice">Registrar</Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Pagar juros */}
       <AlertDialog open={payInterestId !== null} onOpenChange={(o) => !o && setPayInterestId(null)}>
