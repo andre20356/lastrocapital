@@ -8,7 +8,7 @@ COPY lib/api-spec/package.json ./lib/api-spec/
 COPY lib/api-zod/package.json ./lib/api-zod/
 COPY lib/api-client-react/package.json ./lib/api-client-react/
 COPY artifacts/lastrocapital/package.json ./artifacts/lastrocapital/
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
 FROM deps AS builder
 ARG VITE_CLERK_PUBLISHABLE_KEY
