@@ -27,6 +27,10 @@ router.get("/debts", requireAuth, async (req: AuthenticatedRequest, res): Promis
       debt: debtsTable,
       clientName: clientsTable.name,
       invoiceAmount: invoicesTable.amount,
+      invoiceDueDate: invoicesTable.dueDate,
+      invoiceRecurrence: invoicesTable.recurrence,
+      invoiceInterestRate: invoicesTable.interestRate,
+      invoiceLateFee: invoicesTable.lateFee,
       daysOverdue: sql<number>`GREATEST(0, (CURRENT_DATE - ${invoicesTable.dueDate})::integer)`,
     })
     .from(debtsTable)
@@ -39,6 +43,10 @@ router.get("/debts", requireAuth, async (req: AuthenticatedRequest, res): Promis
       ...r.debt,
       clientName: r.clientName ?? null,
       invoiceAmount: r.invoiceAmount != null ? parseFloat(r.invoiceAmount) : null,
+      invoiceDueDate: r.invoiceDueDate ?? null,
+      invoiceRecurrence: r.invoiceRecurrence ?? null,
+      invoiceInterestRate: r.invoiceInterestRate != null ? parseFloat(r.invoiceInterestRate) : null,
+      invoiceLateFee: r.invoiceLateFee != null ? parseFloat(r.invoiceLateFee) : null,
       daysOverdue: r.daysOverdue ?? r.debt.daysOverdue,
     }))
   );
