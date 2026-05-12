@@ -6,9 +6,33 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock } from "lucide-react";
+import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
+
+const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+
+function calcOverdueInstallments(
+  daysOverdue: number,
+  dueDate: string | null | undefined,
+  recurrence: string | null | undefined,
+): { count: number; dates: string[] } {
+  if (!dueDate || daysOverdue <= 0) return { count: 0, dates: [] };
+  const periodDays = recurrence ? (PERIOD_DAYS[recurrence] ?? 0) : 0;
+  const count = periodDays > 0 ? Math.max(1, Math.floor(daysOverdue / periodDays)) : 1;
+  const dates: string[] = [];
+  const start = new Date(dueDate + "T12:00:00Z");
+  for (let i = 0; i < count; i++) {
+    const d = new Date(start);
+    if (recurrence === "monthly") {
+      d.setUTCMonth(d.getUTCMonth() + i);
+    } else {
+      d.setUTCDate(d.getUTCDate() + i * (periodDays || 1));
+    }
+    dates.push(d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }));
+  }
+  return { count, dates };
+}
 
 const FILTER_TABS = [
   { value: "open"   as const, label: "Em aberto" },
@@ -173,6 +197,7 @@ export default function Debts() {
                   <th className="px-5 py-3 font-medium">Cliente</th>
                   <th className="px-5 py-3 font-medium">Valor em aberto</th>
                   <th className="px-5 py-3 font-medium">Dias em Atraso</th>
+                  <th className="px-5 py-3 font-medium">Parcelas Atrasadas</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                   <th className="px-5 py-3 font-medium text-right">Ação</th>
                 </tr>
@@ -180,7 +205,11 @@ export default function Debts() {
               <tbody>
                 {debts.map((debt) => {
                   const isUrgent = debt.daysOverdue > 30;
-                  const isNew = debt.daysOverdue <= 5;
+                  const { count: overdueCount, dates: overdueDates } = calcOverdueInstallments(
+                    debt.daysOverdue,
+                    debt.invoiceDueDate,
+                    debt.invoiceRecurrence,
+                  );
 
                   return (
                     <tr
@@ -215,6 +244,29 @@ export default function Debts() {
                           )
                         ) : (
                           <span className="text-muted-foreground opacity-50">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-5 py-3.5 text-sm">
+                        {debt.status === "open" && overdueCount > 0 ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <CalendarDays className="h-3.5 w-3.5 text-destructive shrink-0" />
+                              <span className={`font-bold tabular-nums ${isUrgent ? "text-destructive" : "text-amber-500"}`}>
+                                {overdueCount} {overdueCount === 1 ? "parcela" : "parcelas"}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-0.5 pl-5">
+                              {overdueDates.slice(0, 5).map((d, i) => (
+                                <span key={i} className="text-xs text-muted-foreground tabular-nums">{d}</span>
+                              ))}
+                              {overdueDates.length > 5 && (
+                                <span className="text-xs text-muted-foreground/60">+{overdueDates.length - 5} mais...</span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground opacity-40">—</span>
                         )}
                       </td>
 
