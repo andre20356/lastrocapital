@@ -399,6 +399,10 @@ export const ListDebtsResponseItem = zod.object({
   clientName: zod.string().nullish(),
   invoiceId: zod.number().nullish(),
   invoiceAmount: zod.number().nullish(),
+  invoiceDueDate: zod.coerce.date().nullish(),
+  invoiceRecurrence: zod.string().nullish(),
+  invoiceInterestRate: zod.number().nullish(),
+  invoiceLateFee: zod.number().nullish(),
   status: zod.enum(["open", "closed"]),
   daysOverdue: zod.number(),
 });
@@ -422,6 +426,10 @@ export const UpdateDebtResponse = zod.object({
   clientName: zod.string().nullish(),
   invoiceId: zod.number().nullish(),
   invoiceAmount: zod.number().nullish(),
+  invoiceDueDate: zod.coerce.date().nullish(),
+  invoiceRecurrence: zod.string().nullish(),
+  invoiceInterestRate: zod.number().nullish(),
+  invoiceLateFee: zod.number().nullish(),
   status: zod.enum(["open", "closed"]),
   daysOverdue: zod.number(),
 });
