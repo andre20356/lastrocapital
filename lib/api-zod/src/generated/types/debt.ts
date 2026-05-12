@@ -17,6 +17,14 @@ export interface Debt {
   invoiceId?: number | null;
   /** @nullable */
   invoiceAmount?: number | null;
+  /** @nullable */
+  invoiceDueDate?: Date | null;
+  /** @nullable */
+  invoiceRecurrence?: string | null;
+  /** @nullable */
+  invoiceInterestRate?: number | null;
+  /** @nullable */
+  invoiceLateFee?: number | null;
   status: DebtStatus;
   daysOverdue: number;
 }
