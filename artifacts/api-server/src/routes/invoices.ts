@@ -202,11 +202,53 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
   }
 
   // When interest is paid, close the associated debt (client is no longer in arrears)
+  // Also advance the due date by one recurrence period and reset for the next cycle
   if (parsed.data.interestPaid === true) {
     await db
       .update(debtsTable)
       .set({ status: "closed" })
       .where(and(eq(debtsTable.invoiceId, invoice.id), eq(debtsTable.status, "open")));
+
+    const recurrence = existingInvoice?.recurrence;
+    const currentDueDate = existingInvoice?.dueDate;
+    if (recurrence && recurrence !== "none" && currentDueDate) {
+      const base = new Date(currentDueDate + "T12:00:00Z");
+      if (recurrence === "monthly") {
+        base.setUTCMonth(base.getUTCMonth() + 1);
+      } else if (recurrence === "weekly") {
+        base.setUTCDate(base.getUTCDate() + 7);
+      } else if (recurrence === "biweekly") {
+        base.setUTCDate(base.getUTCDate() + 14);
+      } else if (recurrence === "daily") {
+        base.setUTCDate(base.getUTCDate() + 1);
+      }
+      const newDueDate = base.toISOString().split("T")[0];
+      const today = new Date().toISOString().split("T")[0];
+      const newStatus = newDueDate > today ? "current" : "overdue";
+      const [advanced] = await db
+        .update(invoicesTable)
+        .set({ dueDate: newDueDate, status: newStatus, interestPaid: false })
+        .where(eq(invoicesTable.id, invoice.id))
+        .returning();
+      if (advanced) {
+        // If the new date is overdue again, create a new debt record
+        if (newStatus === "overdue") {
+          const existing = await db.select().from(debtsTable).where(and(eq(debtsTable.invoiceId, invoice.id), eq(debtsTable.status, "open")));
+          if (existing.length === 0) {
+            await db.insert(debtsTable).values({
+              companyId: req.companyId,
+              clientId: invoice.clientId,
+              invoiceId: invoice.id,
+              status: "open",
+              daysOverdue: 0,
+            });
+          }
+        }
+        const [clientRowAdv] = await db.select().from(clientsTable).where(eq(clientsTable.id, advanced.clientId));
+        res.json(formatInvoice(advanced, clientRowAdv?.name));
+        return;
+      }
+    }
   }
 
   // Record interest payment as a cashflow income entry
