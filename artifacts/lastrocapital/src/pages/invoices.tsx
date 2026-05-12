@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, Fragment } from "react";
 import {
   useListInvoices, getListInvoicesQueryKey,
   useCreateInvoice, useUpdateInvoice, useDeleteInvoice,
@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus, Trash2, CheckCircle2, AlertCircle, FileText,
   Banknote, Calculator, BadgeCheck, Pencil, ClipboardList,
-  Clock, XCircle, CircleCheck,
+  Clock, XCircle, CircleCheck, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -119,6 +119,15 @@ export default function Invoices() {
 
   const [loanTotal, setLoanTotal] = useState("");
   const [loanParcelas, setLoanParcelas] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+
+  const toggleGroup = (clientId: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(clientId)) next.delete(clientId); else next.add(clientId);
+      return next;
+    });
+  };
 
   const { data: invoices, isLoading } = useListInvoices(
     statusFilter !== "all" ? { status: statusFilter } : undefined,
@@ -532,6 +541,19 @@ export default function Invoices() {
 
   const RECURRENCE_LABEL: Record<string, string> = { daily: "Diário", weekly: "Semanal", biweekly: "Quinzenal", monthly: "Mensal" };
 
+  // Group invoices by clientId — preserving order of first appearance
+  const groupedRows = useMemo(() => {
+    if (!invoices) return [];
+    const map = new Map<number, typeof invoices>();
+    const order: number[] = [];
+    for (const inv of invoices) {
+      const cid = inv.clientId;
+      if (!map.has(cid)) { map.set(cid, []); order.push(cid); }
+      map.get(cid)!.push(inv);
+    }
+    return order.map((cid) => ({ clientId: cid, invoices: map.get(cid)! }));
+  }, [invoices]);
+
   return (
     <AppLayout>
       {/* HEADER */}
@@ -654,151 +676,207 @@ export default function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv) => {
-                  const isOverdue = inv.status === "overdue";
-                  const isPaid = inv.status === "paid";
-                  const hasInterest = (inv.interestRate ?? 0) > 0;
-                  const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
-                  const isOverdueWithFees = isOverdue && hasCharges;
-                  const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate) / 100 : 0;
-                  const lateFeeTotal = (inv.lateFee ?? 0) * (inv.daysLate ?? 0);
-                  const alreadyPaidInterest = inv.interestPaid === true;
-                  const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
-                  const StatusIcon = cfg?.icon ?? FileText;
+                {groupedRows.map(({ clientId, invoices: group }) => {
+                  const isMulti = group.length > 1;
+                  const isExpanded = expandedGroups.has(clientId);
+                  const clientName = group[0].clientName ?? `Cliente #${clientId}`;
 
-                  return (
-                    <tr
-                      key={inv.id}
-                      className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors group"
-                      data-testid={`row-invoice-${inv.id}`}
-                    >
-                      <td className="px-5 py-3.5 font-medium text-sm">
-                        {inv.clientName ?? `Cliente #${inv.clientId}`}
-                      </td>
-                      <td className="px-5 py-3.5 font-semibold text-sm tabular-nums">
-                        {formatCurrency(inv.amount)}
-                      </td>
-                      <td className="px-5 py-3.5 text-sm">
-                        {isOverdueWithFees ? (
-                          alreadyPaidInterest ? (
-                            <div>
-                              <span className="font-semibold tabular-nums">{formatCurrency(inv.amount)}</span>
-                              <div className="mt-1">
-                                <span className="text-xs text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5">
-                                  Juros pagos
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <span className="font-bold text-destructive tabular-nums">{formatCurrency(inv.totalDue)}</span>
-                              <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                                {(inv.interestRate ?? 0) > 0 && (
-                                  <div>Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}</div>
-                                )}
-                                {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
-                                  <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        ) : (
-                          <div>
-                            <span className="text-muted-foreground font-medium tabular-nums">{formatCurrency(inv.amount)}</span>
-                            {hasInterest && !isPaid && (
-                              <div className="text-xs text-amber-500 mt-0.5">
-                                Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                        {formatDate(inv.dueDate)}
-                      </td>
-                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
-                        {inv.recurrence ? (RECURRENCE_LABEL[inv.recurrence] ?? "-") : <span className="opacity-40">—</span>}
-                      </td>
-                      <td className="px-5 py-3.5 text-center">
-                        {(() => {
-                          const count = clientParcelasMap.get(inv.clientId) ?? 0;
-                          return count > 0 ? (
-                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-xs font-bold text-emerald-500">
-                              {count}
+                  const renderInvRow = (inv: typeof group[0], isChild: boolean) => {
+                    const isOverdue = inv.status === "overdue";
+                    const isPaid = inv.status === "paid";
+                    const hasInterest = (inv.interestRate ?? 0) > 0;
+                    const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
+                    const isOverdueWithFees = isOverdue && hasCharges;
+                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate) / 100 : 0;
+                    const lateFeeTotal = (inv.lateFee ?? 0) * (inv.daysLate ?? 0);
+                    const alreadyPaidInterest = inv.interestPaid === true;
+                    const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
+                    const StatusIcon = cfg?.icon ?? FileText;
+
+                    return (
+                      <tr
+                        key={inv.id}
+                        className={`border-b border-border last:border-0 hover:bg-accent/40 transition-colors group ${isChild ? "bg-muted/10" : ""}`}
+                        data-testid={`row-invoice-${inv.id}`}
+                      >
+                        <td className="px-5 py-3.5 font-medium text-sm">
+                          {isChild ? (
+                            <span className="pl-5 text-muted-foreground text-xs flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />
+                              Contrato #{inv.id}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground/40 text-xs">—</span>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-5 py-3.5" data-testid={`status-invoice-${inv.id}`}>
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${cfg?.classes ?? "bg-muted text-muted-foreground border border-border"}`}>
-                          <StatusIcon className="h-3 w-3" />
-                          {cfg?.label ?? inv.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center justify-end gap-1 flex-wrap">
-                          {hasInterest && !isPaid && !alreadyPaidInterest && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Pagar somente os juros do mês"
-                              onClick={() => setPayInterestId(inv.id)}
-                              data-testid={`button-pay-interest-${inv.id}`}
-                              className="h-7 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 text-xs gap-1 px-2"
-                            >
-                              <Banknote className="h-3.5 w-3.5" />
-                              Pagar Juros
-                            </Button>
+                            inv.clientName ?? `Cliente #${inv.clientId}`
                           )}
-                          {!isPaid && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Registrar quitação (pagamento total)"
-                              onClick={() => setQuitacaoId(inv.id)}
-                              data-testid={`button-quitacao-${inv.id}`}
-                              className="h-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 text-xs gap-1 px-2"
-                            >
-                              <BadgeCheck className="h-3.5 w-3.5" />
-                              Quitação
-                            </Button>
+                        </td>
+                        <td className="px-5 py-3.5 font-semibold text-sm tabular-nums">
+                          {formatCurrency(inv.amount)}
+                        </td>
+                        <td className="px-5 py-3.5 text-sm">
+                          {isOverdueWithFees ? (
+                            alreadyPaidInterest ? (
+                              <div>
+                                <span className="font-semibold tabular-nums">{formatCurrency(inv.amount)}</span>
+                                <div className="mt-1">
+                                  <span className="text-xs text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5">
+                                    Juros pagos
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="font-bold text-destructive tabular-nums">{formatCurrency(inv.totalDue)}</span>
+                                <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                  {(inv.interestRate ?? 0) > 0 && (
+                                    <div>Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}</div>
+                                  )}
+                                  {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
+                                    <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          ) : (
+                            <div>
+                              <span className="text-muted-foreground font-medium tabular-nums">{formatCurrency(inv.amount)}</span>
+                              {hasInterest && !isPaid && (
+                                <div className="text-xs text-amber-500 mt-0.5">
+                                  Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}
+                                </div>
+                              )}
+                            </div>
                           )}
-                          {inv.status === "pending" && (
+                        </td>
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+                          {formatDate(inv.dueDate)}
+                        </td>
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground">
+                          {inv.recurrence ? (RECURRENCE_LABEL[inv.recurrence] ?? "-") : <span className="opacity-40">—</span>}
+                        </td>
+                        <td className="px-5 py-3.5 text-center">
+                          {(() => {
+                            const count = clientParcelasMap.get(inv.clientId) ?? 0;
+                            return count > 0 ? (
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-xs font-bold text-emerald-500">
+                                {count}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground/40 text-xs">—</span>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-5 py-3.5" data-testid={`status-invoice-${inv.id}`}>
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${cfg?.classes ?? "bg-muted text-muted-foreground border border-border"}`}>
+                            <StatusIcon className="h-3 w-3" />
+                            {cfg?.label ?? inv.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center justify-end gap-1 flex-wrap">
+                            {hasInterest && !isPaid && !alreadyPaidInterest && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Pagar somente os juros do mês"
+                                onClick={() => setPayInterestId(inv.id)}
+                                data-testid={`button-pay-interest-${inv.id}`}
+                                className="h-7 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 text-xs gap-1 px-2"
+                              >
+                                <Banknote className="h-3.5 w-3.5" />
+                                Pagar Juros
+                              </Button>
+                            )}
+                            {!isPaid && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Registrar quitação (pagamento total)"
+                                onClick={() => setQuitacaoId(inv.id)}
+                                data-testid={`button-quitacao-${inv.id}`}
+                                className="h-7 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 text-xs gap-1 px-2"
+                              >
+                                <BadgeCheck className="h-3.5 w-3.5" />
+                                Quitação
+                              </Button>
+                            )}
+                            {inv.status === "pending" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title="Marcar como vencido"
+                                onClick={() => markAs(inv.id, "overdue")}
+                                data-testid={`button-overdue-invoice-${inv.id}`}
+                              >
+                                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7"
-                              title="Marcar como vencido"
-                              onClick={() => markAs(inv.id, "overdue")}
-                              data-testid={`button-overdue-invoice-${inv.id}`}
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Editar cobrança"
+                              onClick={() => openEditDialog(inv as any)}
+                              data-testid={`button-edit-invoice-${inv.id}`}
                             >
-                              <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                              <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Editar cobrança"
-                            onClick={() => openEditDialog(inv as any)}
-                            data-testid={`button-edit-invoice-${inv.id}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => setDeleteId(inv.id)}
-                            data-testid={`button-delete-invoice-${inv.id}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => setDeleteId(inv.id)}
+                              data-testid={`button-delete-invoice-${inv.id}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  };
+
+                  if (!isMulti) return renderInvRow(group[0], false);
+
+                  // Multi-contract group header
+                  const totalPrincipal = group.reduce((s, inv) => s + (inv.amount ?? 0), 0);
+                  const hasOverdue = group.some((inv) => inv.status === "overdue");
+                  const recurrences = [...new Set(group.map((inv) => inv.recurrence).filter(Boolean))];
+
+                  return (
+                    <Fragment key={`group-${clientId}`}>
+                      <tr
+                        onClick={() => toggleGroup(clientId)}
+                        className="cursor-pointer border-b border-border hover:bg-accent/60 transition-colors bg-muted/25"
+                      >
+                        <td className="px-5 py-3.5" colSpan={8}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isExpanded
+                              ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                              : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                            }
+                            <span className="font-semibold text-sm">{clientName}</span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                              {group.length} contratos
+                            </span>
+                            {hasOverdue && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-destructive/10 border border-destructive/20 text-xs font-medium text-destructive">
+                                Em atraso
+                              </span>
+                            )}
+                            {recurrences.map((r) => r && (
+                              <span key={r} className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted border border-border text-xs text-muted-foreground">
+                                {RECURRENCE_LABEL[r] ?? r}
+                              </span>
+                            ))}
+                            <span className="ml-auto text-sm font-bold tabular-nums">
+                              {formatCurrency(totalPrincipal)}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && group.map((inv) => renderInvRow(inv, true))}
+                    </Fragment>
                   );
                 })}
               </tbody>
