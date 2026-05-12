@@ -8,5 +8,6 @@ export const formatCurrency = (value: number | null | undefined) => {
 
 export const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return "-";
-  return new Intl.DateTimeFormat("pt-BR").format(new Date(dateString));
+  const [year, month, day] = dateString.slice(0, 10).split("-").map(Number);
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(year, month - 1, day));
 };
