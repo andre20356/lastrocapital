@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Plus, Trash2, CheckCircle2, AlertCircle, FileText,
   Banknote, Calculator, BadgeCheck, Pencil, ClipboardList,
-  Clock, XCircle, CircleCheck, ChevronDown, ChevronRight,
+  Clock, XCircle, CircleCheck, ChevronDown, ChevronRight, Search,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -120,6 +120,7 @@ export default function Invoices() {
   const [loanTotal, setLoanTotal] = useState("");
   const [loanParcelas, setLoanParcelas] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState("");
 
   const toggleGroup = (clientId: number) => {
     setExpandedGroups((prev) => {
@@ -551,8 +552,13 @@ export default function Invoices() {
       if (!map.has(cid)) { map.set(cid, []); order.push(cid); }
       map.get(cid)!.push(inv);
     }
-    return order.map((cid) => ({ clientId: cid, invoices: map.get(cid)! }));
-  }, [invoices]);
+    const all = order.map((cid) => ({ clientId: cid, invoices: map.get(cid)! }));
+    if (!search.trim()) return all;
+    const q = search.trim().toLowerCase();
+    return all.filter(({ invoices: grp }) =>
+      (grp[0].clientName ?? "").toLowerCase().includes(q)
+    );
+  }, [invoices, search]);
 
   return (
     <AppLayout>
@@ -624,22 +630,34 @@ export default function Invoices() {
         </Card>
       </div>
 
-      {/* FILTROS */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        {FILTER_TABS.map(({ value, label }) => (
-          <button
-            key={value}
-            onClick={() => setStatusFilter(value)}
-            data-testid={`button-filter-${value}`}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors border ${
-              statusFilter === value
-                ? "bg-foreground text-background border-foreground"
-                : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* FILTROS + BUSCA */}
+      <div className="flex flex-col gap-3 mb-5">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Buscar devedor pelo nome..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            data-testid="input-search-invoice"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {FILTER_TABS.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setStatusFilter(value)}
+              data-testid={`button-filter-${value}`}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors border ${
+                statusFilter === value
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-transparent text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* TABELA */}
