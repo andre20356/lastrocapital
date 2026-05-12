@@ -171,7 +171,7 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
   const updateData: any = {};
   if (parsed.data.status !== undefined) updateData.status = parsed.data.status;
   if (parsed.data.amount !== undefined) updateData.amount = String(parsed.data.amount);
-  if (parsed.data.dueDate !== undefined) updateData.dueDate = parsed.data.dueDate;
+  if (parsed.data.dueDate !== undefined) updateData.dueDate = (parsed.data.dueDate as unknown as Date).toISOString().split("T")[0];
   if (parsed.data.interestRate !== undefined) updateData.interestRate = String(parsed.data.interestRate);
   if (parsed.data.lateFee !== undefined) updateData.lateFee = String(parsed.data.lateFee);
   if (parsed.data.daysLate !== undefined) updateData.daysLate = parsed.data.daysLate;
