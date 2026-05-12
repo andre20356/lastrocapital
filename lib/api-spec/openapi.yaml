@@ -841,6 +841,15 @@ components:
           type: ["integer", "null"]
         invoiceAmount:
           type: ["number", "null"]
+        invoiceDueDate:
+          type: ["string", "null"]
+          format: date
+        invoiceRecurrence:
+          type: ["string", "null"]
+        invoiceInterestRate:
+          type: ["number", "null"]
+        invoiceLateFee:
+          type: ["number", "null"]
         status:
           type: string
           enum: [open, closed]
