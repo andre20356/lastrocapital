@@ -1,5 +1,8 @@
 import { eq, count, desc } from "drizzle-orm";
-import { db, subscriptionsTable, clientsTable, cashFlowTable, invoicesTable } from "@workspace/db";
+import { db, subscriptionsTable, clientsTable, cashFlowTable, invoicesTable, companiesTable } from "@workspace/db";
+
+const ADMIN_USER_IDS = (process.env.ADMIN_CLERK_USER_IDS ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 
 export interface PlanLimits {
   clients: number | null;
@@ -28,6 +31,14 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
 const UNLIMITED: PlanLimits = { clients: null, cashflowEntries: null, invoices: null };
 
 export async function getCompanyPlanLimits(companyId: number): Promise<PlanLimits> {
+  // Admin tem acesso ilimitado independente do plano
+  const [company] = await db
+    .select({ clerkUserId: companiesTable.clerkUserId })
+    .from(companiesTable)
+    .where(eq(companiesTable.id, companyId));
+
+  if (company && ADMIN_USER_IDS.includes(company.clerkUserId)) return UNLIMITED;
+
   const [subscription] = await db
     .select()
     .from(subscriptionsTable)

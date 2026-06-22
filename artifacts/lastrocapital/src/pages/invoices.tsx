@@ -299,11 +299,6 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div>
-        <Label htmlFor="inv-days">Dias de Atraso</Label>
-        <Input id="inv-days" type="number" min="0" step="1" placeholder="0" {...form.register("daysLate")} data-testid="input-invoice-days-late" />
-      </div>
-
       {breakdown && breakdown.principal > 0 && (
         <div className="rounded-lg border border-border bg-muted/40 divide-y divide-border overflow-hidden">
           <div className="flex justify-between items-center px-4 py-2 text-sm">
@@ -1040,10 +1035,6 @@ export default function Invoices() {
                 <Label htmlFor="edit-inv-latefee">Multa por dia (R$)</Label>
                 <Input id="edit-inv-latefee" placeholder="0,00" {...editForm.register("lateFee")} data-testid="input-edit-invoice-latefee" />
               </div>
-            </div>
-            <div>
-              <Label htmlFor="edit-inv-days">Dias de Atraso</Label>
-              <Input id="edit-inv-days" type="number" min="0" step="1" placeholder="0" {...editForm.register("daysLate")} data-testid="input-edit-invoice-days-late" />
             </div>
             <div>
               <Label htmlFor="edit-inv-due">Data de Vencimento</Label>

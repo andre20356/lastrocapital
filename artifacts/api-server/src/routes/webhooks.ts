@@ -7,7 +7,10 @@ const router = Router();
 
 function verifySignature(req: Request): boolean {
   const secret = process.env.ABACATEPAY_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    console.warn("[webhook] ABACATEPAY_WEBHOOK_SECRET não configurado — rejeitando requisição");
+    return false;
+  }
 
   const signature = (req.headers["x-abacatepay-signature"] as string) ?? "";
   const payload = JSON.stringify(req.body);

@@ -69,7 +69,10 @@ export default function Debts() {
 
   const openDebts  = debts?.filter((d) => d.status === "open") ?? [];
   const closedDebts = debts?.filter((d) => d.status === "closed") ?? [];
-  const totalOpen  = openDebts.reduce((s, d) => s + (d.invoiceAmount ?? 0), 0);
+  const totalOpen  = openDebts.reduce((s, d) => {
+    const multa = (d.invoiceLateFee ?? 0) * (d.daysOverdue ?? 0);
+    return s + (d.invoiceAmount ?? 0) + multa;
+  }, 0);
   const totalClosed = closedDebts.reduce((s, d) => s + (d.invoiceAmount ?? 0), 0);
 
   const urgentCount  = openDebts.filter((d) => d.daysOverdue > 30).length;
@@ -195,7 +198,7 @@ export default function Debts() {
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground bg-muted/30">
                   <th className="px-5 py-3 font-medium">Cliente</th>
-                  <th className="px-5 py-3 font-medium">Valor em aberto</th>
+                  <th className="px-5 py-3 font-medium">Total (c/ multa)</th>
                   <th className="px-5 py-3 font-medium">Dias em Atraso</th>
                   <th className="px-5 py-3 font-medium">Parcelas Atrasadas</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
@@ -221,13 +224,33 @@ export default function Debts() {
                         {debt.clientName ?? `Cliente #${debt.clientId}`}
                       </td>
 
-                      <td className="px-5 py-3.5 font-bold text-sm tabular-nums">
-                        {debt.invoiceAmount != null
-                          ? <span className={debt.status === "open" ? "text-destructive" : "text-muted-foreground"}>
-                              {formatCurrency(debt.invoiceAmount)}
-                            </span>
-                          : <span className="opacity-40">—</span>
-                        }
+                      <td className="px-5 py-3.5 text-sm tabular-nums">
+                        {debt.invoiceAmount != null ? (
+                          <div>
+                            {(() => {
+                              const multa = (debt.invoiceLateFee ?? 0) * (debt.daysOverdue ?? 0);
+                              const total = debt.invoiceAmount + multa;
+                              if (debt.status === "open" && multa > 0) {
+                                return (
+                                  <div>
+                                    <span className="font-bold text-destructive">{formatCurrency(total)}</span>
+                                    <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
+                                      <div>Principal: {formatCurrency(debt.invoiceAmount)}</div>
+                                      <div className="text-destructive/80">
+                                        Multa: {debt.daysOverdue}d × {formatCurrency(debt.invoiceLateFee)} = {formatCurrency(multa)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <span className={`font-bold ${debt.status === "open" ? "text-destructive" : "text-muted-foreground"}`}>
+                                  {formatCurrency(debt.invoiceAmount)}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        ) : <span className="opacity-40">—</span>}
                       </td>
 
                       <td className="px-5 py-3.5 text-sm">

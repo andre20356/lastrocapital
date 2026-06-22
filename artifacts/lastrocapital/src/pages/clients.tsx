@@ -34,6 +34,7 @@ interface ClientFormData {
   email: string;
   document: string;
   status: "active" | "inactive";
+  referralSource: string;
 }
 
 function whatsappUrl(phone: string | null | undefined, name: string) {
@@ -65,7 +66,7 @@ export default function Clients() {
   const deleteClient = useDeleteClient();
 
   const form = useForm<ClientFormData>({
-    defaultValues: { name: "", phone: "", email: "", document: "", status: "active" },
+    defaultValues: { name: "", phone: "", email: "", document: "", status: "active", referralSource: "" },
   });
 
   const filtered = clients?.filter((c) =>
@@ -75,7 +76,7 @@ export default function Clients() {
 
   const openCreate = () => {
     setEditingId(null);
-    form.reset({ name: "", phone: "", email: "", document: "", status: "active" });
+    form.reset({ name: "", phone: "", email: "", document: "", status: "active", referralSource: "" });
     setDialogOpen(true);
   };
 
@@ -87,6 +88,7 @@ export default function Clients() {
       email: client.email ?? "",
       document: client.document ?? "",
       status: (client.status as "active" | "inactive") ?? "active",
+      referralSource: client.referralSource && client.referralSource !== "invite_link" ? client.referralSource : "",
     });
     setDialogOpen(true);
   };
@@ -98,6 +100,7 @@ export default function Clients() {
       email: data.email || undefined,
       document: data.document || undefined,
       status: data.status,
+      referralSource: data.referralSource.trim() || undefined,
     };
 
     if (editingId) {
@@ -109,6 +112,9 @@ export default function Clients() {
             setDialogOpen(false);
             toast({ title: "Cliente atualizado com sucesso" });
           },
+          onError: (err: any) => {
+            toast({ title: "Erro ao atualizar cliente", description: err?.message ?? "Tente novamente.", variant: "destructive" });
+          },
         }
       );
     } else {
@@ -119,6 +125,9 @@ export default function Clients() {
             queryClient.invalidateQueries({ queryKey: getListClientsQueryKey() });
             setDialogOpen(false);
             toast({ title: "Cliente adicionado à carteira" });
+          },
+          onError: (err: any) => {
+            toast({ title: "Erro ao criar cliente", description: err?.message ?? "Tente novamente.", variant: "destructive" });
           },
         }
       );
@@ -365,8 +374,8 @@ export default function Clients() {
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground bg-muted/30">
                   <th className="px-5 py-3 font-medium">Nome</th>
+                  <th className="px-5 py-3 font-medium">Indicação</th>
                   <th className="px-5 py-3 font-medium">Telefone</th>
-                  <th className="px-5 py-3 font-medium">E-mail</th>
                   <th className="px-5 py-3 font-medium">Documento</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                   <th className="px-5 py-3 font-medium text-right">Ações</th>
@@ -388,11 +397,6 @@ export default function Clients() {
                       <td className="px-5 py-3.5 font-medium">
                         <div className="flex items-center gap-2">
                           <span>{client.name}</span>
-                          {client.referralSource === "invite_link" && (
-                            <span className="text-xs text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5">
-                              convite
-                            </span>
-                          )}
                           {hasOverdue && (
                             <span className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded px-1.5 py-0.5">
                               em atraso
@@ -400,11 +404,21 @@ export default function Clients() {
                           )}
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-sm text-muted-foreground">
-                        {client.phone ?? <span className="opacity-40">—</span>}
+                      <td className="px-5 py-3.5 text-sm">
+                        {client.referralSource && client.referralSource !== "invite_link" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                            {client.referralSource}
+                          </span>
+                        ) : client.referralSource === "invite_link" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted border border-border text-xs text-muted-foreground">
+                            link convite
+                          </span>
+                        ) : (
+                          <span className="opacity-40">—</span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground">
-                        {client.email ?? <span className="opacity-40">—</span>}
+                        {client.phone ?? <span className="opacity-40">—</span>}
                       </td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground">
                         {client.document ?? <span className="opacity-40">—</span>}
@@ -511,6 +525,18 @@ export default function Clients() {
             <div>
               <Label htmlFor="document">CPF / CNPJ</Label>
               <Input id="document" placeholder="000.000.000-00" {...form.register("document")} data-testid="input-client-document" />
+            </div>
+            <div>
+              <Label htmlFor="referralSource">Indicação</Label>
+              <Input
+                id="referralSource"
+                placeholder="Ex: Lucas, João, Facebook..."
+                {...form.register("referralSource")}
+                data-testid="input-client-referral"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Use <code>/vencidos&lt;nome&gt;</code> no Telegram para filtrar por indicação
+              </p>
             </div>
             <div>
               <Label>Situação</Label>
