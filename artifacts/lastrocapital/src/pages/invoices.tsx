@@ -1025,11 +1025,12 @@ export default function Invoices() {
 
       {/* Editar cobrança */}
       <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="flex flex-col max-h-[90vh]">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Editar Cobrança</DialogTitle>
           </DialogHeader>
-          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="flex flex-col flex-1 min-h-0">
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
             <div>
               <Label>Cliente *</Label>
               <Select value={editForm.watch("clientId")} onValueChange={(v) => { editForm.setValue("clientId", v); editForm.clearErrors("clientId"); }}>
@@ -1101,7 +1102,8 @@ export default function Invoices() {
                 data-testid="input-edit-invoice-notes"
               />
             </div>
-            <DialogFooter>
+            </div>
+            <DialogFooter className="shrink-0 pt-4">
               <Button type="button" variant="outline" onClick={() => setEditingInvoice(null)}>Cancelar</Button>
               <Button type="submit" disabled={updateInvoice.isPending} data-testid="button-submit-edit-invoice">Salvar</Button>
             </DialogFooter>
