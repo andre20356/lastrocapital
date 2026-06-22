@@ -1640,20 +1640,56 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                   return sum + Math.max(1, Math.floor(dl / 30));
                 }, 0);
                 const overdueTag = overdueCount > 0 ? ` | ⚠️ <b>${overdueCount} parcela${overdueCount > 1 ? "s" : ""} em atraso</b>` : "";
-                let listMsg = `👤 <b>${client.name}</b>${phone}${refTag}\n\n📋 <b>${invoices.length} contratos</b>${overdueTag} — escolha um:\n\n`;
-                invoices.forEach((inv, i) => {
+                const header = `👤 <b>${client.name}</b>${phone}${refTag}\n📋 <b>${invoices.length} contrato${invoices.length > 1 ? "s" : ""}</b>${overdueTag} — escolha um:\n\n`;
+
+                const NUM_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"];
+                const blocks = invoices.map((inv, i) => {
                   const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
                   const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
                   const principal = parseFloat(inv.amount ?? "0") || 0;
-                  const daysLate = inv.status === "overdue" && due ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-                  const multa = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
-                  listMsg += `${i + 1}. ${STATUS_LABEL[inv.status] ?? inv.status} — ${dueFmt}\n   💰 ${fmtBRL(principal)}`;
-                  if (daysLate > 0) listMsg += ` | ${daysLate} dias atraso`;
-                  if (multa > 0) listMsg += ` | multa ${fmtBRL(multa)}`;
-                  listMsg += `\n\n`;
+                  const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
+                  const daysLate = inv.status === "overdue" && due
+                    ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
+                  const multa = feePerDay * daysLate;
+                  const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
+                  const numTag = i < NUM_EMOJI.length ? NUM_EMOJI[i] : `${i + 1}.`;
+
+                  let block = `${numTag} <b>${statusLabel}</b> — ${dueFmt}\n`;
+                  block += `💰 Principal: ${fmtBRL(principal)}`;
+                  if (daysLate > 0) block += `\n⏳ ${daysLate} dias de atraso`;
+                  if (multa > 0)    block += `\n⚠️ Multa: ${fmtBRL(multa)}`;
+                  block += `\n\n📝 <b>Observação:</b>\n`;
+                  if (inv.notes) {
+                    block += inv.notes;
+                    if (inv.notesUpdatedAt) {
+                      const d = new Date(inv.notesUpdatedAt);
+                      block += `\n<i>Atualizado em ${d.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}</i>`;
+                    }
+                  } else {
+                    block += `Nenhuma observação cadastrada.`;
+                  }
+                  block += `\n\n────────────────────`;
+                  return block;
                 });
+
+                const footer = `\nDigite o número do contrato ou /cancelar:`;
+                const MAX_LEN = 3500;
+
+                // Grava estado antes de enviar (Telegram pode ser lento)
                 conversations.set(chatId, { step: "cs_select_invoice", companyIdFilter: companyId, cs_clientName: client.name, cs_clientPhone: client.phone ?? undefined, cs_clientRef: client.referralSource ?? undefined, cs_invoices: invoices });
-                await sendTelegram(token, chatId, listMsg + `Digite o número do contrato ou /cancelar:`);
+
+                let currentMsg = header;
+                for (let b = 0; b < blocks.length; b++) {
+                  const isLast = b === blocks.length - 1;
+                  const chunk = blocks[b] + (isLast ? footer : "\n\n");
+                  if (currentMsg !== header && currentMsg.length + chunk.length > MAX_LEN) {
+                    await sendTelegram(token, chatId, currentMsg.trimEnd());
+                    currentMsg = chunk;
+                  } else {
+                    currentMsg += chunk;
+                  }
+                }
+                if (currentMsg.trim()) await sendTelegram(token, chatId, currentMsg.trimEnd());
               }
             } else {
               const msg = await buildClientMessage(clientName, companyId);
