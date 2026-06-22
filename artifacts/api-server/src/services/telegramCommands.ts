@@ -608,6 +608,13 @@ function buildInvoiceDetail(
     }
     msg += `\n💸 <b>Total devido: ${fmtBRL(total)}</b>`;
   }
+  if (inv.notes) {
+    msg += `\n\n📝 <b>Observação:</b>\n${inv.notes}`;
+    if (inv.notesUpdatedAt) {
+      const d = new Date(inv.notesUpdatedAt);
+      msg += `\n<i>Atualizado em ${d.toLocaleDateString("pt-BR", { timeZone: "UTC" })} ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}</i>`;
+    }
+  }
   msg += `\n🔢 ID: #${inv.id}`;
   return msg;
 }

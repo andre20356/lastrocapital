@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays } from "lucide-react";
+import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays, FileText } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
@@ -221,7 +221,21 @@ export default function Debts() {
                       data-testid={`row-debt-${debt.id}`}
                     >
                       <td className="px-5 py-3.5 font-medium text-sm">
-                        {debt.clientName ?? `Cliente #${debt.clientId}`}
+                        <div>{debt.clientName ?? `Cliente #${debt.clientId}`}</div>
+                        {debt.invoiceId && (
+                          <div className="text-xs text-muted-foreground/60 mt-0.5">Contrato #{debt.invoiceId}</div>
+                        )}
+                        {debt.invoiceNotes && (
+                          <div className="flex items-start gap-1 mt-1 max-w-[220px]">
+                            <FileText className="h-3 w-3 text-muted-foreground/50 shrink-0 mt-0.5" />
+                            <span className="text-xs text-muted-foreground/70 italic whitespace-pre-wrap break-words">{debt.invoiceNotes}</span>
+                          </div>
+                        )}
+                        {debt.invoiceNotes && debt.invoiceNotesUpdatedAt && (
+                          <div className="text-xs text-muted-foreground/40 mt-0.5 pl-4">
+                            {new Date(debt.invoiceNotesUpdatedAt).toLocaleDateString("pt-BR")}
+                          </div>
+                        )}
                       </td>
 
                       <td className="px-5 py-3.5 text-sm tabular-nums">

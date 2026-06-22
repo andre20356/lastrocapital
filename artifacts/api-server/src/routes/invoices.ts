@@ -42,6 +42,7 @@ const formatInvoice = (invoice: any, clientName?: string | null) => {
     daysLate,
     totalDue,
     notes: invoice.notes ?? null,
+    notesUpdatedAt: invoice.notesUpdatedAt ?? null,
     clientName: clientName ?? null,
   };
 };
@@ -116,6 +117,7 @@ router.post("/invoices", requireAuth, async (req: AuthenticatedRequest, res): Pr
         lateFee: parsed.data.lateFee != null ? String(parsed.data.lateFee) : "0",
         daysLate: parsed.data.daysLate ?? 0,
         notes: parsed.data.notes ? parsed.data.notes.replace(/<[^>]*>/g, "").slice(0, 1000) : null,
+        notesUpdatedAt: parsed.data.notes ? new Date() : null,
       })
       .returning();
 
@@ -218,6 +220,7 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
       const sanitized = parsed.data.notes.replace(/<[^>]*>/g, "").slice(0, 1000);
       updateData.notes = sanitized;
       if (sanitized !== (existingInvoice.notes ?? "")) {
+        updateData.notesUpdatedAt = new Date();
         logger.info(
           { invoiceId: params.data.id, companyId: req.companyId, userId: req.auth?.userId },
           "[invoices] nota atualizada"

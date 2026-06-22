@@ -125,7 +125,7 @@ export default function Invoices() {
     id: number; clientId: number; clientName?: string | null; amount?: number | null;
     dueDate?: string | null; recurrence?: string | null; status: string;
     interestRate?: number | null; lateFee?: number | null; daysLate?: number | null;
-    notes?: string | null;
+    notes?: string | null; notesUpdatedAt?: Date | null;
   } | null>(null);
 
   const editForm = useForm<InvoiceFormData>({
@@ -583,7 +583,9 @@ export default function Invoices() {
     if (!search.trim()) return all;
     const q = search.trim().toLowerCase();
     return all.filter(({ invoices: grp }) =>
-      (grp[0].clientName ?? "").toLowerCase().includes(q)
+      (grp[0].clientName ?? "").toLowerCase().includes(q) ||
+      grp.some((inv) => (inv.notes ?? "").toLowerCase().includes(q)) ||
+      grp.some((inv) => String(inv.id).includes(q))
     );
   }, [invoices, search]);
 
@@ -795,8 +797,9 @@ export default function Invoices() {
                         <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
                           <div>{formatDate(inv.dueDate)}</div>
                           {inv.notes && (
-                            <div className="text-xs text-muted-foreground/70 italic mt-0.5 max-w-[180px] truncate" title={inv.notes}>
-                              {inv.notes}
+                            <div className="flex items-start gap-1 mt-0.5" title={inv.notes}>
+                              <FileText className="h-3 w-3 text-muted-foreground/60 shrink-0 mt-0.5" />
+                              <span className="text-xs text-muted-foreground/70 italic max-w-[170px] truncate">{inv.notes}</span>
                             </div>
                           )}
                         </td>
@@ -1107,6 +1110,12 @@ export default function Invoices() {
               />
               {editForm.formState.errors.notes && (
                 <p className="text-xs text-destructive mt-1">{editForm.formState.errors.notes.message}</p>
+              )}
+              {editingInvoice?.notesUpdatedAt && (
+                <p className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  Última atualização: {new Date(editingInvoice.notesUpdatedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                </p>
               )}
             </div>
             <DialogFooter>

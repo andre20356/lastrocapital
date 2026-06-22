@@ -249,6 +249,7 @@ export const ListInvoicesResponseItem = zod.object({
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
   notes: zod.string().nullish(),
+  notesUpdatedAt: zod.coerce.date().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod
@@ -320,6 +321,7 @@ export const GetInvoiceResponse = zod.object({
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
   notes: zod.string().nullish(),
+  notesUpdatedAt: zod.coerce.date().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod
@@ -375,6 +377,7 @@ export const UpdateInvoiceResponse = zod.object({
     .describe("Indica se os juros e multa já foram pagos separadamente"),
   totalDue: zod.number().nullish(),
   notes: zod.string().nullish(),
+  notesUpdatedAt: zod.coerce.date().nullish(),
   status: zod.enum(["pending", "paid", "overdue", "requested", "current"]),
   dueDate: zod.coerce.date().nullish(),
   recurrence: zod
@@ -408,6 +411,8 @@ export const ListDebtsResponseItem = zod.object({
   invoiceRecurrence: zod.string().nullish(),
   invoiceInterestRate: zod.number().nullish(),
   invoiceLateFee: zod.number().nullish(),
+  invoiceNotes: zod.string().nullish(),
+  invoiceNotesUpdatedAt: zod.coerce.date().nullish(),
   status: zod.enum(["open", "closed"]),
   daysOverdue: zod.number(),
 });

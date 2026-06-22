@@ -40,6 +40,8 @@ export interface Invoice {
   totalDue?: number | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  notesUpdatedAt?: Date | null;
   status: InvoiceStatus;
   /** @nullable */
   dueDate?: Date | null;
