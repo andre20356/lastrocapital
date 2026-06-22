@@ -292,7 +292,7 @@ export const CreateInvoiceBody = zod.object({
     .min(createInvoiceBodyDaysLateMin)
     .optional()
     .describe("Número de dias de atraso"),
-  notes: zod.string().optional(),
+  notes: zod.string().max(1000).optional(),
 });
 
 /**
@@ -354,7 +354,7 @@ export const UpdateInvoiceBody = zod.object({
     .boolean()
     .optional()
     .describe("Marca os juros e multa como pagos separadamente"),
-  notes: zod.string().optional(),
+  notes: zod.string().max(1000).optional(),
 });
 
 export const UpdateInvoiceResponse = zod.object({

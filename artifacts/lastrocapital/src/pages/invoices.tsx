@@ -350,14 +350,18 @@ export default function Invoices() {
         </Select>
       </div>
       <div>
-        <Label htmlFor="inv-notes">Comentários</Label>
+        <Label htmlFor="inv-notes">Notas</Label>
         <Textarea
           id="inv-notes"
-          placeholder="Observações sobre este contrato..."
-          rows={3}
-          {...form.register("notes")}
+          placeholder="Digite observações sobre esta cobrança..."
+          style={{ minHeight: "100px" }}
+          maxLength={1000}
+          {...form.register("notes", { maxLength: { value: 1000, message: "Máximo 1000 caracteres" } })}
           data-testid="input-invoice-notes"
         />
+        {form.formState.errors.notes && (
+          <p className="text-xs text-destructive mt-1">{form.formState.errors.notes.message}</p>
+        )}
       </div>
     </>
   );
@@ -1047,16 +1051,6 @@ export default function Invoices() {
               <Label htmlFor="edit-inv-amount">Valor Principal (R$)</Label>
               <Input id="edit-inv-amount" placeholder="0,00" {...editForm.register("amount")} data-testid="input-edit-invoice-amount" />
             </div>
-            <div>
-              <Label htmlFor="edit-inv-notes">Comentários</Label>
-              <Textarea
-                id="edit-inv-notes"
-                placeholder="Observações sobre este contrato..."
-                rows={3}
-                {...editForm.register("notes")}
-                data-testid="input-edit-invoice-notes"
-              />
-            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="edit-inv-interest">Juros (%)</Label>
@@ -1100,6 +1094,20 @@ export default function Invoices() {
                   <SelectItem value="current">Em Dia</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label htmlFor="edit-inv-notes">Notas</Label>
+              <Textarea
+                id="edit-inv-notes"
+                placeholder="Digite observações sobre esta cobrança..."
+                style={{ minHeight: "100px" }}
+                maxLength={1000}
+                {...editForm.register("notes", { maxLength: { value: 1000, message: "Máximo 1000 caracteres" } })}
+                data-testid="input-edit-invoice-notes"
+              />
+              {editForm.formState.errors.notes && (
+                <p className="text-xs text-destructive mt-1">{editForm.formState.errors.notes.message}</p>
+              )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditingInvoice(null)}>Cancelar</Button>

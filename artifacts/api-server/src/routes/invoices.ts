@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, invoicesTable, clientsTable, debtsTable, cashFlowTable } from "@workspace/db";
+import { logger } from "../lib/logger";
 import {
   CreateInvoiceBody,
   UpdateInvoiceBody,
@@ -114,7 +115,7 @@ router.post("/invoices", requireAuth, async (req: AuthenticatedRequest, res): Pr
         interestRate: parsed.data.interestRate != null ? String(parsed.data.interestRate) : "0",
         lateFee: parsed.data.lateFee != null ? String(parsed.data.lateFee) : "0",
         daysLate: parsed.data.daysLate ?? 0,
-        notes: parsed.data.notes ?? null,
+        notes: parsed.data.notes ? parsed.data.notes.replace(/<[^>]*>/g, "").slice(0, 1000) : null,
       })
       .returning();
 
@@ -213,7 +214,16 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
     if (parsed.data.lateFee !== undefined) updateData.lateFee = String(parsed.data.lateFee);
     if (parsed.data.daysLate !== undefined) updateData.daysLate = parsed.data.daysLate;
     if (parsed.data.interestPaid !== undefined) updateData.interestPaid = parsed.data.interestPaid;
-    if (parsed.data.notes !== undefined) updateData.notes = parsed.data.notes;
+    if (parsed.data.notes !== undefined) {
+      const sanitized = parsed.data.notes.replace(/<[^>]*>/g, "").slice(0, 1000);
+      updateData.notes = sanitized;
+      if (sanitized !== (existingInvoice.notes ?? "")) {
+        logger.info(
+          { invoiceId: params.data.id, companyId: req.companyId, userId: req.auth?.userId },
+          "[invoices] nota atualizada"
+        );
+      }
+    }
 
     const [invoice] = await db
       .update(invoicesTable)
