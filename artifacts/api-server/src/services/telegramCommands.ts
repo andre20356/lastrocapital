@@ -590,12 +590,21 @@ function buildInvoiceDetail(
     msg += `\n🔄 Recorrência: ${inv.recurrence}`;
   if (inv.status === "overdue" && daysLate > 0) {
     msg += `\n\n<b>${daysLate} dias em atraso (${monthsLate} mês${monthsLate > 1 ? "es" : ""})</b>`;
-    if (multa > 0) msg += `\n⚠️ Multa acumulada: ${fmtBRL(multa)}`;
-    if (jurosMes > 0) {
-      if (monthsLate > 1)
-        msg += `\n📈 Juros: ${fmtBRL(jurosMes)}/mês × ${monthsLate} meses = <b>${fmtBRL(jurosTotal)}</b>`;
-      else
-        msg += `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
+    if (monthsLate > 1 && (multa > 0 || jurosMes > 0)) {
+      msg += "\n\n📊 <b>Detalhamento por mês:</b>";
+      for (let m = 1; m <= monthsLate; m++) {
+        const daysInMonth = m < monthsLate ? 30 : daysLate - 30 * (monthsLate - 1);
+        const multaMes = feePerDay * daysInMonth;
+        const subtotalMes = jurosMes + multaMes;
+        msg += `\n\n📅 <b>Mês ${m}:</b>`;
+        if (jurosMes > 0) msg += `\n   📈 Juros: ${fmtBRL(jurosMes)}`;
+        if (multaMes > 0) msg += `\n   ⚠️ Multa (${daysInMonth}d): ${fmtBRL(multaMes)}`;
+        msg += `\n   Subtotal: ${fmtBRL(subtotalMes)}`;
+      }
+      msg += "\n";
+    } else {
+      if (multa > 0) msg += `\n⚠️ Multa acumulada: ${fmtBRL(multa)}`;
+      if (jurosMes > 0) msg += `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
     }
     msg += `\n💸 <b>Total devido: ${fmtBRL(total)}</b>`;
   }
