@@ -562,60 +562,67 @@ function buildInvoiceDetail(
   const daysLate = inv.status === "overdue" && due
     ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000))
     : (inv.daysLate ?? 0);
-  const principal    = parseFloat(inv.amount ?? "0") || 0;
-  const feePerDay    = parseFloat(inv.lateFee ?? "0") || 0;
-  const rate         = parseFloat(inv.interestRate ?? "0") || 0;
-  const monthsLate   = (inv.status === "overdue" && daysLate > 0)
+  const principal  = parseFloat(inv.amount ?? "0") || 0;
+  const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
+  const rate       = parseFloat(inv.interestRate ?? "0") || 0;
+  const monthsLate = (inv.status === "overdue" && daysLate > 0)
     ? Math.max(1, Math.floor(daysLate / 30)) : 0;
-  const multa        = feePerDay * daysLate;
-  const jurosMes     = (principal * rate) / 100;
-  const jurosTotal   = jurosMes * (monthsLate || 1);
-  const total        = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
-  const dueFmt       = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
-  const statusLabel  = STATUS_LABEL[inv.status] ?? inv.status;
-  const phoneTag     = phone ? ` | ${phone}` : "";
-  const refTag       = referral && referral !== "invite_link" ? `\n🔗 Indicação: ${referral}` : "";
+  const multa      = feePerDay * daysLate;
+  const jurosMes   = (principal * rate) / 100;
+  const jurosTotal = jurosMes * (monthsLate || 1);
+  const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
+  const dueFmt     = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
+  const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
+  const phoneTag   = phone ? ` | ${phone}` : "";
+  const refTag     = referral && referral !== "invite_link" ? `\n🔗 Indicação: ${referral}` : "";
 
   let msg =
-    `👤 <b>${clientName}</b>${phoneTag}${refTag}\n\n` +
-    `${statusLabel}\n` +
-    `📅 Vencimento: <b>${dueFmt}</b>\n` +
-    `💰 Principal: <b>${fmtBRL(principal)}</b>`;
+    `👤 <b>${clientName}</b>${phoneTag}${refTag}\n` +
+    `📋 <b>Contrato #${inv.id}</b>\n` +
+    `${statusLabel}\n\n` +
+    `💰 <b>Valor Principal:</b> ${fmtBRL(principal)}\n` +
+    `📅 <b>Vencimento:</b> ${dueFmt}`;
 
-  if (rate > 0)
-    msg += `\n📈 Juros: ${inv.interestRate}%/mês`;
-  if (feePerDay > 0)
-    msg += `\n⚠️ Multa/dia: ${fmtBRL(feePerDay)}`;
-  if (inv.recurrence)
-    msg += `\n🔄 Recorrência: ${inv.recurrence}`;
+  if (rate > 0)   msg += `\n📈 <b>Juros:</b> ${inv.interestRate}%/mês`;
+  if (feePerDay > 0) msg += `\n⚠️ <b>Multa:</b> ${fmtBRL(feePerDay)}/dia`;
+  if (inv.recurrence) msg += `\n🔄 Recorrência: ${inv.recurrence}`;
+
   if (inv.status === "overdue" && daysLate > 0) {
-    msg += `\n\n<b>${daysLate} dias em atraso (${monthsLate} mês${monthsLate > 1 ? "es" : ""})</b>`;
+    msg += `\n\n⏳ <b>Dias em atraso:</b> ${daysLate} dias`;
+    msg += `\n📆 <b>Meses em atraso:</b> ${monthsLate} mês${monthsLate > 1 ? "es" : ""}`;
+
     if (monthsLate > 1 && (multa > 0 || jurosMes > 0)) {
-      msg += "\n\n📊 <b>Detalhamento por mês:</b>";
+      msg += `\n\n📊 <b>Detalhamento por mês:</b>`;
       for (let m = 1; m <= monthsLate; m++) {
         const daysInMonth = m < monthsLate ? 30 : daysLate - 30 * (monthsLate - 1);
         const multaMes = feePerDay * daysInMonth;
         const subtotalMes = jurosMes + multaMes;
         msg += `\n\n📅 <b>Mês ${m}:</b>`;
-        if (jurosMes > 0) msg += `\n   📈 Juros: ${fmtBRL(jurosMes)}`;
-        if (multaMes > 0) msg += `\n   ⚠️ Multa (${daysInMonth}d): ${fmtBRL(multaMes)}`;
+        if (jurosMes > 0) msg += `\n   💵 Juros: ${fmtBRL(jurosMes)}`;
+        if (multaMes > 0) msg += `\n   💸 Multa (${daysInMonth}d): ${fmtBRL(multaMes)}`;
         msg += `\n   Subtotal: ${fmtBRL(subtotalMes)}`;
       }
       msg += "\n";
     } else {
-      if (multa > 0) msg += `\n⚠️ Multa acumulada: ${fmtBRL(multa)}`;
-      if (jurosMes > 0) msg += `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
+      if (jurosMes > 0) msg += `\n\n💵 <b>Juros acumulados:</b> ${fmtBRL(jurosTotal)}`;
+      if (multa > 0)    msg += `\n💸 <b>Multa total:</b> ${fmtBRL(multa)}`;
     }
-    msg += `\n💸 <b>Total devido: ${fmtBRL(total)}</b>`;
+
+    msg += `\n\n🧾 <b>Total para quitação hoje:</b> ${fmtBRL(total)}`;
   }
+
+  msg += `\n\n📝 <b>Observação:</b>`;
   if (inv.notes) {
-    msg += `\n\n📝 <b>Observação:</b>\n${inv.notes}`;
+    msg += `\n${inv.notes}`;
     if (inv.notesUpdatedAt) {
       const d = new Date(inv.notesUpdatedAt);
-      msg += `\n<i>Atualizado em ${d.toLocaleDateString("pt-BR", { timeZone: "UTC" })} ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}</i>`;
+      msg += `\n<i>Atualizado em ${d.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}</i>`;
     }
+  } else {
+    msg += `\nNenhuma observação cadastrada.`;
   }
-  msg += `\n🔢 ID: #${inv.id}`;
+
+  msg += `\n\n━━━━━━━━━━━━━━━━━━━━`;
   return msg;
 }
 
@@ -676,6 +683,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
 
   const rows = await db
     .select({
+      invoiceId:      invoicesTable.id,
       clientName:     clientsTable.name,
       clientPhone:    clientsTable.phone,
       referralSource: clientsTable.referralSource,
@@ -683,6 +691,8 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
       dueDate:        invoicesTable.dueDate,
       lateFee:        invoicesTable.lateFee,
       interestRate:   invoicesTable.interestRate,
+      notes:          invoicesTable.notes,
+      notesUpdatedAt: invoicesTable.notesUpdatedAt,
       companyName:    companiesTable.name,
     })
     .from(invoicesTable)
@@ -714,10 +724,11 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
     const feePerDay  = parseFloat(row.lateFee ?? "0") || 0;
     const rate       = parseFloat(row.interestRate ?? "0") || 0;
     const multa      = feePerDay * daysLate;
-    const juros      = (principal * rate) / 100;
-    const total      = principal + juros + multa;
+    const monthsLate = Math.max(1, Math.floor(daysLate / 30));
+    const jurosMes   = (principal * rate) / 100;
+    const jurosTotal = jurosMes * monthsLate;
+    const total      = principal + jurosTotal + multa;
     totalGeral      += total;
-
     const dueDateFmt  = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
     const phone       = row.clientPhone ? ` | ${row.clientPhone}` : "";
     const companyTag  = !companyId && row.companyName ? `\n   🏢 ${row.companyName}` : "";
@@ -725,12 +736,14 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
 
     let entry =
       `👤 <b>${row.clientName ?? "—"}</b>${phone}${companyTag}${refTag}\n` +
-      `   📅 Venceu: ${dueDateFmt} (<b>${daysLate} dias</b>)\n` +
+      `📋 Contrato #${row.invoiceId}\n` +
+      `   📅 Venceu: ${dueDateFmt} | ⏳ <b>${daysLate} dias</b> (${monthsLate} mês${monthsLate > 1 ? "es" : ""})\n` +
       `   💰 Principal: ${fmtBRL(principal)}`;
 
-    if (juros > 0) entry += `\n   📈 Juros ${rate}%: ${fmtBRL(juros)}`;
-    if (multa > 0) entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
-    if (juros > 0 || multa > 0) entry += `\n   💸 <b>Total: ${fmtBRL(total)}</b>`;
+    if (jurosMes > 0) entry += `\n   📈 Juros (${rate}%): ${fmtBRL(jurosTotal)}`;
+    if (multa > 0)    entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+    if (jurosMes > 0 || multa > 0) entry += `\n   💸 <b>Quitação: ${fmtBRL(total)}</b>`;
+    if (row.notes)    entry += `\n   📝 <i>${row.notes}</i>`;
 
     lines.push(entry);
   }
@@ -750,17 +763,20 @@ const AJUDA_MSG = `📖 <b>Comandos disponíveis</b>
 /resumo — total geral da carteira
 
 <b>Cobranças em atraso:</b>
-/vencidos — lista todos os clientes em atraso
+/vencidos — lista todos os contratos em atraso
 /vencidos<i>nome</i> — filtra por indicação (ex: /vencidoslucas)
+
+<b>Busca rápida:</b>
+/contrato 27 — detalhes completos do Contrato #27
+/detalhes 27 — alias para /contrato
+/cliente Lucas — ficha completa do cliente Lucas
+/<i>nome</i> — atalho: ficha do cliente (ex: /nagila)
 
 <b>Registrar:</b>
 /novocliente — cadastrar novo cliente
 /cobranca — registrar nova cobrança (passo a passo)
 /quitacao — registrar pagamento, juros ou multa
 /cancelar — cancelar operação em andamento
-
-<b>Busca de cliente:</b>
-/<i>nome</i> — ficha completa do cliente (ex: /nagila)
 
 <b>Notificações para clientes:</b>
 /vincular — cliente vincula Telegram para receber alertas de vencimento
@@ -937,20 +953,21 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
       const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
 
-      let entry = `\n   ${statusLabel} — vence ${dueFmt}\n   💰 ${fmtBRL(principal)}`;
+      let entry = `\n📋 <b>Contrato #${inv.id}</b> — ${statusLabel}\n   📅 Vencimento: ${dueFmt}\n   💰 Principal: ${fmtBRL(principal)}`;
 
       if (inv.status === "overdue") {
-        if (daysLate > 0) entry += ` | <b>${daysLate} dias em atraso</b>`;
-        if (multa > 0)    entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+        if (daysLate > 0) entry += ` | ⏳ <b>${daysLate} dias em atraso</b>`;
         if (jurosMes > 0) {
-          if (monthsLate > 1)
-            entry += `\n   📈 Juros: ${fmtBRL(jurosMes)}/mês × ${monthsLate} meses = <b>${fmtBRL(jurosTotal)}</b>`;
-          else
-            entry += `\n   📈 Juros: ${fmtBRL(jurosTotal)}`;
+          entry += monthsLate > 1
+            ? `\n   📈 Juros: ${fmtBRL(jurosMes)}/mês × ${monthsLate} meses = <b>${fmtBRL(jurosTotal)}</b>`
+            : `\n   📈 Juros: ${fmtBRL(jurosTotal)}`;
         }
-        if (multa > 0 || jurosMes > 0) entry += `\n   💸 <b>Total: ${fmtBRL(total)}</b>`;
+        if (multa > 0) entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+        if (multa > 0 || jurosMes > 0) entry += `\n   💸 <b>Quitação: ${fmtBRL(total)}</b>`;
         totalAberto += total;
       }
+
+      if (inv.notes) entry += `\n   📝 <i>${inv.notes}</i>`;
 
       lines.push(entry);
     }
@@ -1557,6 +1574,36 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
         } else if (rawCmd === "/resumo") {
           const msg = await buildResumoMessage(companyId);
           await sendTelegram(token, chatId, msg);
+
+        } else if (rawCmd === "/contrato" || rawCmd === "/detalhes") {
+          const idStr = text.trim().slice(rawCmd.length).trim().replace(/^#/, "");
+          const id = parseInt(idStr, 10);
+          if (isNaN(id) || id <= 0) {
+            await sendTelegram(token, chatId, `❌ Informe o número do contrato.\nExemplo: <code>/contrato 27</code>`);
+          } else {
+            const conds: any[] = [eq(invoicesTable.id, id)];
+            if (companyId) conds.push(eq(invoicesTable.companyId, companyId));
+            const [row] = await db
+              .select({ invoice: invoicesTable, clientName: clientsTable.name, clientPhone: clientsTable.phone, clientRef: clientsTable.referralSource })
+              .from(invoicesTable)
+              .leftJoin(clientsTable, eq(invoicesTable.clientId, clientsTable.id))
+              .where(and(...conds));
+            if (!row) {
+              await sendTelegram(token, chatId, `❌ Contrato #${id} não encontrado.`);
+            } else {
+              const msg = buildInvoiceDetail(row.invoice, row.clientName ?? "—", row.clientPhone ?? undefined, row.clientRef ?? undefined);
+              await sendTelegram(token, chatId, msg);
+            }
+          }
+
+        } else if (rawCmd === "/cliente") {
+          const clientName = text.trim().slice(rawCmd.length).trim();
+          if (!clientName) {
+            await sendTelegram(token, chatId, `❌ Informe o nome do cliente.\nExemplo: <code>/cliente Lucas</code>`);
+          } else {
+            const msg = await buildClientMessage(clientName, companyId);
+            await sendTelegram(token, chatId, msg);
+          }
 
         } else if (isVencidos) {
           const prefix = rawCmd.startsWith("/vencidos") ? "/vencidos" : "/vencido";
