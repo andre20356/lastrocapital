@@ -66,6 +66,42 @@ services:
       - api
       - web
 
+  evolution:
+    image: atendai/evolution-api:v2.2.3
+    container_name: lastrocapital_evolution
+    restart: unless-stopped
+    ports:
+      - "8181:8080"
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8181}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-changeme-evolution}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: ${DATABASE_URL_EVOLUTION:-postgresql://lastrocapital:changeme@db:5432/evolution}
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      CACHE_REDIS_ENABLED: "false"
+      DEL_INSTANCE: "false"
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_URL:-http://api:8080/api/webhook/whatsapp}
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPDATE: "false"
+      CONFIG_SESSION_PHONE_CLIENT: LastroCapital
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      LANGUAGE: pt-BR
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   nginx_logs:
+  evolution_instances:

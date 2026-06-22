@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { checkDueDateNotifications } from "./services/telegramNotifier";
 import { startTelegramCommandPolling } from "./services/telegramCommands";
+import { initWhatsAppInstance } from "./services/whatsappCommands";
 
 const rawPort = process.env["PORT"];
 
@@ -49,4 +50,20 @@ app.listen(port, (err) => {
 
   scheduleDaily();
   startTelegramCommandPolling();
+
+  // WhatsApp via Evolution API (opcional — só inicia se EVOLUTION_SERVER_URL estiver configurado)
+  const waUrl    = process.env["EVOLUTION_SERVER_URL"];
+  const waKey    = process.env["EVOLUTION_API_KEY"];
+  const waInst   = process.env["WHATSAPP_INSTANCE"];
+  const waAdmin  = process.env["WHATSAPP_ADMIN_PHONE"];
+  const waWebhook = process.env["EVOLUTION_WEBHOOK_URL"] ?? `http://api:8080/api/webhook/whatsapp`;
+  if (waUrl && waKey && waInst && waAdmin) {
+    const companyIdRaw = process.env["WHATSAPP_COMPANY_ID"];
+    initWhatsAppInstance(
+      { apiUrl: waUrl, apiKey: waKey, instance: waInst, adminPhone: waAdmin, companyId: companyIdRaw ? parseInt(companyIdRaw, 10) : undefined },
+      waWebhook,
+    ).catch((e) => logger.warn({ err: e }, "[WA] Falha ao inicializar instância"));
+  } else {
+    logger.info("[WA] EVOLUTION_SERVER_URL/WHATSAPP_INSTANCE não configurados — bot WhatsApp desabilitado");
+  }
 });

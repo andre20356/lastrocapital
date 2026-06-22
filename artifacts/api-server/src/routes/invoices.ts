@@ -222,7 +222,7 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
       if (sanitized !== (existingInvoice.notes ?? "")) {
         updateData.notesUpdatedAt = new Date();
         logger.info(
-          { invoiceId: params.data.id, companyId: req.companyId, userId: req.auth?.userId },
+          { invoiceId: params.data.id, companyId: req.companyId, userId: req.userId },
           "[invoices] nota atualizada"
         );
       }
