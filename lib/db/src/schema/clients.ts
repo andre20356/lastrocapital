@@ -12,6 +12,7 @@ export const clientsTable = pgTable("clients", {
   document: text("document"),
   status: text("status").notNull().default("active"),
   referralSource: text("referral_source"),
+  telegramChatId: text("telegram_chat_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
