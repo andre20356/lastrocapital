@@ -40,6 +40,7 @@ const formatInvoice = (invoice: any, clientName?: string | null) => {
     lateFee,
     daysLate,
     totalDue,
+    notes: invoice.notes ?? null,
     clientName: clientName ?? null,
   };
 };
@@ -113,6 +114,7 @@ router.post("/invoices", requireAuth, async (req: AuthenticatedRequest, res): Pr
         interestRate: parsed.data.interestRate != null ? String(parsed.data.interestRate) : "0",
         lateFee: parsed.data.lateFee != null ? String(parsed.data.lateFee) : "0",
         daysLate: parsed.data.daysLate ?? 0,
+        notes: parsed.data.notes ?? null,
       })
       .returning();
 
@@ -211,6 +213,7 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
     if (parsed.data.lateFee !== undefined) updateData.lateFee = String(parsed.data.lateFee);
     if (parsed.data.daysLate !== undefined) updateData.daysLate = parsed.data.daysLate;
     if (parsed.data.interestPaid !== undefined) updateData.interestPaid = parsed.data.interestPaid;
+    if (parsed.data.notes !== undefined) updateData.notes = parsed.data.notes;
 
     const [invoice] = await db
       .update(invoicesTable)

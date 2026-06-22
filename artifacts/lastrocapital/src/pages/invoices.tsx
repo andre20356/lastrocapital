@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "@/components/ui/drawer";
@@ -50,6 +51,7 @@ interface InvoiceFormData {
   interestRate: string;
   lateFee: string;
   daysLate: string;
+  notes: string;
 }
 
 const STATUS_CONFIG: Record<InvoiceStatus, {
@@ -123,10 +125,11 @@ export default function Invoices() {
     id: number; clientId: number; clientName?: string | null; amount?: number | null;
     dueDate?: string | null; recurrence?: string | null; status: string;
     interestRate?: number | null; lateFee?: number | null; daysLate?: number | null;
+    notes?: string | null;
   } | null>(null);
 
   const editForm = useForm<InvoiceFormData>({
-    defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0" },
+    defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0", notes: "" },
   });
 
   const [loanTotal, setLoanTotal] = useState("");
@@ -154,7 +157,7 @@ export default function Invoices() {
   const deleteInvoice = useDeleteInvoice();
 
   const form = useForm<InvoiceFormData>({
-    defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0" },
+    defaultValues: { clientId: "", amount: "", dueDate: "", recurrence: "none", status: "pending", interestRate: "0", lateFee: "0", daysLate: "0", notes: "" },
   });
 
   const watchedAmount = useWatch({ control: form.control, name: "amount" });
@@ -346,6 +349,16 @@ export default function Invoices() {
           </SelectContent>
         </Select>
       </div>
+      <div>
+        <Label htmlFor="inv-notes">Comentários</Label>
+        <Textarea
+          id="inv-notes"
+          placeholder="Observações sobre este contrato..."
+          rows={3}
+          {...form.register("notes")}
+          data-testid="input-invoice-notes"
+        />
+      </div>
     </>
   );
 
@@ -366,6 +379,7 @@ export default function Invoices() {
           interestRate: parseFloat(data.interestRate) || 0,
           lateFee: parseBRL(data.lateFee) || 0,
           daysLate: parseInt(data.daysLate) || 0,
+          notes: data.notes.trim() || undefined,
         },
       },
       {
@@ -449,6 +463,7 @@ export default function Invoices() {
       interestRate: inv.interestRate != null ? String(inv.interestRate) : "0",
       lateFee: inv.lateFee != null ? String(inv.lateFee).replace(".", ",") : "0",
       daysLate: inv.daysLate != null ? String(inv.daysLate) : "0",
+      notes: inv.notes ?? "",
     });
   };
 
@@ -464,6 +479,7 @@ export default function Invoices() {
           interestRate: parseFloat(data.interestRate) || 0,
           lateFee: parseBRL(data.lateFee) || 0,
           daysLate: parseInt(data.daysLate) || 0,
+          notes: data.notes.trim() || undefined,
         },
       },
       {
@@ -773,7 +789,12 @@ export default function Invoices() {
                           )}
                         </td>
                         <td className="px-5 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                          {formatDate(inv.dueDate)}
+                          <div>{formatDate(inv.dueDate)}</div>
+                          {inv.notes && (
+                            <div className="text-xs text-muted-foreground/70 italic mt-0.5 max-w-[180px] truncate" title={inv.notes}>
+                              {inv.notes}
+                            </div>
+                          )}
                         </td>
                         <td className="px-5 py-3.5 text-sm text-muted-foreground">
                           {inv.recurrence ? (RECURRENCE_LABEL[inv.recurrence] ?? "-") : <span className="opacity-40">—</span>}
@@ -1069,6 +1090,16 @@ export default function Invoices() {
                   <SelectItem value="current">Em Dia</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label htmlFor="edit-inv-notes">Comentários</Label>
+              <Textarea
+                id="edit-inv-notes"
+                placeholder="Observações sobre este contrato..."
+                rows={3}
+                {...editForm.register("notes")}
+                data-testid="input-edit-invoice-notes"
+              />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditingInvoice(null)}>Cancelar</Button>

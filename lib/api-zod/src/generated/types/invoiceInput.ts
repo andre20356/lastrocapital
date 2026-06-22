@@ -30,4 +30,5 @@ export interface InvoiceInput {
    * @minimum 0
    */
   daysLate?: number;
+  notes?: string;
 }

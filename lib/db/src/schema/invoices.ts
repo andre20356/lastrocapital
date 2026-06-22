@@ -16,6 +16,7 @@ export const invoicesTable = pgTable("invoices", {
   lateFee: numeric("late_fee", { precision: 10, scale: 2 }).default("0"),
   daysLate: integer("days_late").default(0),
   interestPaid: boolean("interest_paid").default(false),
+  notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
