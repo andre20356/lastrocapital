@@ -745,7 +745,25 @@ async function handleClientStepWA(
       }
       waConversations.delete(phone);
       const total = input === "1" ? (state.cl_totalAmount ?? 0) : (state.cl_jurosAmount ?? 0);
-      await sendWA(cfg, phone, `💸 Valor a pagar: ${b(fmtBRL(total))}\n\nApós realizar o PIX, envie o comprovante aqui. 📎`);
+      const label = input === "1" ? "Quitação Total" : "Juros + Taxas de Atraso";
+
+      const [company] = await db.select({
+        pixKey: companiesTable.pixKey, pixKeyType: companiesTable.pixKeyType,
+        pixRecipientName: companiesTable.pixRecipientName, pixBankName: companiesTable.pixBankName,
+      }).from(companiesTable).where(eq(companiesTable.id, companyId)).limit(1);
+
+      const pixTypeLabel: Record<string, string> = {
+        cpf: "CPF", cnpj: "CNPJ", email: "E-mail", telefone: "Telefone", aleatoria: "Chave Aleatória",
+      };
+
+      let msg = `💳 ${b(`${label} — ${state.cl_clientName ?? ""}`)}\n\n`;
+      msg += `💸 Valor: ${b(fmtBRL(total))}\n`;
+      if (company?.pixRecipientName) msg += `👤 Recebedor: ${b(company.pixRecipientName)}\n`;
+      if (company?.pixBankName)      msg += `🏦 Banco: ${company.pixBankName}\n`;
+      if (company?.pixKey)           msg += `🔑 Chave PIX (${pixTypeLabel[company.pixKeyType ?? ""] ?? "PIX"}): ${company.pixKey}\n`;
+      msg += `\nApós realizar o pagamento, envie o comprovante aqui. 📎`;
+
+      await sendWA(cfg, phone, msg);
       waConversations.set(phone, { step: "cl_await_comprovante", isClientFlow: true, companyIdFilter: companyId, cl_clientId: state.cl_clientId, cl_clientName: state.cl_clientName });
       break;
     }
