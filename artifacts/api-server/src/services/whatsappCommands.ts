@@ -991,82 +991,6 @@ async function handleConvStepWA(cfg: WaConfig, phone: string, text: string, stat
   }
 }
 
-// ── Comandos admin ────────────────────────────────────────────────────────────
-
-async function handleAdminCommandWA(cfg: WaConfig, phone: string, text: string): Promise<void> {
-  const parts  = text.trim().split(/\s+/);
-  const rawCmd = parts[0].toLowerCase();
-  const args   = parts.slice(1).join(" ");
-  const cId    = cfg.companyId;
-
-  switch (rawCmd) {
-    case "/resumo": {
-      const msg = await buildResumoWA(cId);
-      await sendWA(cfg, phone, msg);
-      break;
-    }
-    case "/vencidos": {
-      const msg = await buildVencidosWA(cId, args || undefined);
-      await sendWAChunked(cfg, phone, msg);
-      break;
-    }
-    case "/contrato":
-    case "/detalhes": {
-      const id = parseInt(args);
-      if (isNaN(id)) { await sendWA(cfg, phone, `❌ Use: /contrato 27`); break; }
-      const conds: any[] = [eq(invoicesTable.id, id)];
-      if (cId) conds.push(eq(invoicesTable.companyId, cId));
-      const [inv] = await db.select().from(invoicesTable).where(and(...conds)).limit(1);
-      if (!inv) { await sendWA(cfg, phone, `❌ Contrato #${id} não encontrado.`); break; }
-      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, inv.clientId)).limit(1);
-      const msg = buildInvoiceDetailWA(inv, client?.name ?? "—", client?.phone ?? undefined, client?.referralSource ?? undefined);
-      await sendWAChunked(cfg, phone, msg);
-      break;
-    }
-    case "/cliente": {
-      if (!args) { await sendWA(cfg, phone, `❌ Use: /cliente Lucas`); break; }
-      const msg = await buildClientMessageWA(args, cId);
-      await sendWAChunked(cfg, phone, msg);
-      break;
-    }
-    case "/novocliente": {
-      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
-      waConversations.set(phone, { step: "nc_name", companyIdFilter: cId });
-      await sendWA(cfg, phone, `👤 Nome do novo cliente:`);
-      break;
-    }
-    case "/cobranca": {
-      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
-      waConversations.set(phone, { step: "client", companyIdFilter: cId });
-      await sendWA(cfg, phone, `👤 Nome do cliente para a cobrança:`);
-      break;
-    }
-    case "/quitacao": {
-      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
-      waConversations.set(phone, { step: "qt_client", companyIdFilter: cId });
-      await sendWA(cfg, phone, `👤 Nome do cliente para registrar pagamento:`);
-      break;
-    }
-    case "/cancelar":
-      await sendWA(cfg, phone, `Nenhuma operação em andamento.`);
-      break;
-    case "/ajuda":
-    case "/help":
-      await sendWA(cfg, phone, AJUDA_WA);
-      break;
-    default: {
-      // /<nome> — atalho de busca de cliente
-      if (rawCmd.startsWith("/") && rawCmd.length > 1) {
-        const name = rawCmd.slice(1);
-        const msg = await buildClientMessageWA(name, cId);
-        await sendWAChunked(cfg, phone, msg);
-        break;
-      }
-      await sendWA(cfg, phone, `❓ Comando não reconhecido. Digite /ajuda para ver os comandos.`);
-    }
-  }
-}
-
 // ── Webhook principal ─────────────────────────────────────────────────────────
 
 export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promise<void> {
@@ -1108,8 +1032,6 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
       "";
     const hasMedia = !!(data.message?.imageMessage || data.message?.documentMessage || data.message?.audioMessage);
 
-    const isAdmin = phoneMatch(cfg.adminPhone, senderPhone);
-
     // Comprovante de pagamento enviado pelo cliente
     if (hasMedia) {
       const activeConv = waConversations.get(senderPhone);
@@ -1130,21 +1052,11 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
     // Conversa em andamento
     const activeConv = waConversations.get(senderPhone);
     if (activeConv) {
-      if (isAdmin && !activeConv.isClientFlow) {
-        await handleConvStepWA(cfg, senderPhone, text, activeConv);
-      } else {
-        await handleClientStepWA(cfg, senderPhone, text, activeConv, cfg.companyId ?? activeConv.companyIdFilter ?? 0);
-      }
+      await handleClientStepWA(cfg, senderPhone, text, activeConv, cfg.companyId ?? activeConv.companyIdFilter ?? 0);
       return;
     }
 
-    // Admin: roteamento de comandos
-    if (isAdmin) {
-      await handleAdminCommandWA(cfg, senderPhone, text);
-      return;
-    }
-
-    // Cliente: só ativa com /start
+    // Clientes: só ativa com /start
     const rawCmd = text.trim().split(/\s+/)[0].toLowerCase();
     if (rawCmd !== "/start") return;
 

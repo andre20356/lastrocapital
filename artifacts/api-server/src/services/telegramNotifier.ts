@@ -7,15 +7,6 @@ import { sendWA, type WaConfig } from "./whatsappCommands";
 const ADMIN_TOKEN   = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID ?? "";
 
-function buildWaAdminConfig(): WaConfig | null {
-  const apiUrl     = process.env["EVOLUTION_SERVER_URL"];
-  const apiKey     = process.env["EVOLUTION_API_KEY"];
-  const instance   = process.env["WHATSAPP_INSTANCE"];
-  const adminPhone = process.env["WHATSAPP_ADMIN_PHONE"];
-  if (!apiUrl || !apiKey || !instance || !adminPhone) return null;
-  const companyId = process.env["WHATSAPP_COMPANY_ID"] ? parseInt(process.env["WHATSAPP_COMPANY_ID"], 10) : undefined;
-  return { apiUrl, apiKey, instance, adminPhone, companyId };
-}
 
 async function sendTelegram(token: string, chatId: string, text: string): Promise<void> {
   if (!token || !chatId) return;
@@ -94,21 +85,6 @@ export async function checkDueDateNotifications(): Promise<void> {
       logger.info(`[Telegram] Admin notificado: ${rows.length} fatura(s) em ${label}`);
     }
 
-    // 1b. Notifica admin via WhatsApp
-    const waCfg = buildWaAdminConfig();
-    if (waCfg?.adminPhone) {
-      const lines = rows.map((r) => {
-        const valor = r.amount ? `R$ ${parseFloat(r.amount).toFixed(2).replace(".", ",")}` : "—";
-        const fone  = r.clientPhone ? ` | ${r.clientPhone}` : "";
-        return `  • *${r.clientName ?? "—"}*${fone} — ${valor} (${r.companyName ?? "?"})`;
-      });
-      const msg = `${icon} *Vencimentos em ${label}* (${targetDate})\n` + lines.join("\n");
-      await sendWA(waCfg, waCfg.adminPhone, msg).catch((e: any) =>
-        logger.warn(`[WA] Falha ao notificar admin: ${e.message}`),
-      );
-      logger.info(`[WA] Admin notificado: ${rows.length} fatura(s) em ${label}`);
-    }
-
     // 2. Notifica cada empresa individualmente com suas próprias faturas
     for (const company of companies) {
       if (!company.telegramBotToken || !company.telegramChatId) continue;
@@ -155,6 +131,14 @@ export async function checkDueDateNotifications(): Promise<void> {
     }
 
     // 4. Notifica clientes via WhatsApp (quem tem telefone cadastrado)
+    const waApiUrl   = process.env["EVOLUTION_SERVER_URL"];
+    const waApiKey   = process.env["EVOLUTION_API_KEY"];
+    const waInstance = process.env["WHATSAPP_INSTANCE"];
+    const waAdmin    = process.env["WHATSAPP_ADMIN_PHONE"];
+    const waCfg = waApiUrl && waApiKey && waInstance && waAdmin
+      ? { apiUrl: waApiUrl, apiKey: waApiKey, instance: waInstance, adminPhone: waAdmin,
+          companyId: process.env["WHATSAPP_COMPANY_ID"] ? parseInt(process.env["WHATSAPP_COMPANY_ID"], 10) : undefined }
+      : null;
     if (waCfg) {
       const waClientRows = rows.filter((r) => r.clientPhone);
       for (const r of waClientRows) {
