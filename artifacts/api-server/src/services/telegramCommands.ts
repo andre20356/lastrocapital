@@ -1,6 +1,7 @@
 import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTable } from "@workspace/db";
 import { eq, and, ilike, ne, or } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { pendingWaPayments, sendWA, type WaConfig } from "./whatsappCommands";
 
 // ── Conversa para /cobranca ───────────────────────────────────────────────────
 
@@ -106,6 +107,16 @@ async function editMsgRemoveButtons(token: string, chatId: number | string, mess
       }),
     });
   } catch {}
+}
+
+function buildWaConfig(): WaConfig | null {
+  const apiUrl     = process.env["EVOLUTION_SERVER_URL"];
+  const apiKey     = process.env["EVOLUTION_API_KEY"];
+  const instance   = process.env["WHATSAPP_INSTANCE"];
+  const adminPhone = process.env["WHATSAPP_ADMIN_PHONE"];
+  if (!apiUrl || !apiKey || !instance || !adminPhone) return null;
+  const companyId = process.env["WHATSAPP_COMPANY_ID"] ? parseInt(process.env["WHATSAPP_COMPANY_ID"], 10) : undefined;
+  return { apiUrl, apiKey, instance, adminPhone, companyId };
 }
 
 async function forwardTelegramMessage(token: string, toChatId: number | string, fromChatId: number, messageId: number): Promise<void> {
@@ -1414,13 +1425,39 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
 
           } else if (cbData.startsWith("pay_no:") && cbChatId && cbMsgId) {
             const [, , clientChatId] = cbData.split(":");
-            // Remove botões do admin e mostra rejeição
             await editMsgRemoveButtons(token, cbChatId, cbMsgId,
               `❌ <b>Pagamento rejeitado.</b>\nCliente foi notificado para entrar em contato.`);
-            // Notifica o cliente
             if (clientChatId) {
               await sendTelegram(token, clientChatId,
                 `❌ Houve um problema ao processar seu pagamento.\n\nPor favor, entre em contato com o administrador para verificar o comprovante.`);
+            }
+
+          } else if (cbData.startsWith("wapy_yes:") && cbChatId && cbMsgId) {
+            const payId = cbData.slice("wapy_yes:".length);
+            const pending = pendingWaPayments.get(payId);
+            pendingWaPayments.delete(payId);
+            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
+              `✅ <b>Pagamento confirmado!</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`);
+            if (pending) {
+              const waCfg = buildWaConfig();
+              if (waCfg) {
+                await sendWA(waCfg, pending.phone,
+                  `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n✅ *Pagamento Confirmado!*\n\nOlá, ${pending.clientName}! 😊\n\nSeu pagamento foi recebido e *confirmado com sucesso!* 🎉\n\nAgradecemos pela sua confiança na *Lastro Capital*. 💚\n\nEm caso de dúvidas, estamos à disposição.`);
+              }
+            }
+
+          } else if (cbData.startsWith("wapy_no:") && cbChatId && cbMsgId) {
+            const payId = cbData.slice("wapy_no:".length);
+            const pending = pendingWaPayments.get(payId);
+            pendingWaPayments.delete(payId);
+            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
+              `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`);
+            if (pending) {
+              const waCfg = buildWaConfig();
+              if (waCfg) {
+                await sendWA(waCfg, pending.phone,
+                  `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ *Atenção*\n\nOlá, ${pending.clientName}!\n\nNão conseguimos identificar o seu pagamento no sistema.\n\nPor favor, entre em contato com nossa *administração* para verificar e regularizar sua situação.\n\nEstamos aqui para te ajudar. 💚`);
+              }
             }
           }
           continue;

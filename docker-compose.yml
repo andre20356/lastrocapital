@@ -37,6 +37,12 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID}
       ADMIN_CLERK_USER_IDS: ${ADMIN_CLERK_USER_IDS}
+      EVOLUTION_SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://api:8080/api/webhook/whatsapp}
+      WHATSAPP_INSTANCE: ${WHATSAPP_INSTANCE:-lastrocapital}
+      WHATSAPP_ADMIN_PHONE: ${WHATSAPP_ADMIN_PHONE}
+      WHATSAPP_COMPANY_ID: ${WHATSAPP_COMPANY_ID:-1}
     expose:
       - "8080"
 
@@ -67,7 +73,7 @@ services:
       - web
 
   evolution:
-    image: atendai/evolution-api:v2.2.3
+    image: atendai/evolution-api:v2.1.2
     container_name: lastrocapital_evolution
     restart: unless-stopped
     ports:
@@ -92,11 +98,16 @@ services:
       WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
       WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
       WEBHOOK_EVENTS_MESSAGES_UPDATE: "false"
+      WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
+      QRCODE_LIMIT: "30"
+      QRCODE_EXPIRATION_TIME: "45"
       CONFIG_SESSION_PHONE_CLIENT: LastroCapital
       CONFIG_SESSION_PHONE_NAME: Chrome
+      CONFIG_SESSION_PHONE_VERSION: "2.3000.1035194821"
       LANGUAGE: pt-BR
     volumes:
       - evolution_instances:/evolution/instances
+      - ./evolution-patches/main.js:/evolution/dist/main.js:ro
     depends_on:
       db:
         condition: service_healthy

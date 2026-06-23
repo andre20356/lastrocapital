@@ -27,7 +27,8 @@ export function calculateInvoiceBreakdown(invoice: InvoiceLike): InvoiceBreakdow
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
 
-  const interestAmount = (principal * rate) / 100;
+  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
+  const interestAmount = ((principal * rate) / 100) * monthsLate;
   const lateFeeTotal = feePerDay * days;
   const total = principal + interestAmount + lateFeeTotal;
 
@@ -46,7 +47,8 @@ export function calculateInterestOnly(invoice: InvoiceLike): number {
   const rate = parseFloat(invoice.interestRate ?? "0") || 0;
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
-  return (principal * rate) / 100 + feePerDay * days;
+  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
+  return ((principal * rate) / 100) * monthsLate + feePerDay * days;
 }
 
 export interface EmprestimoSemanal {

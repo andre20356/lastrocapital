@@ -7,6 +7,7 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import whatsappRouter from "./routes/whatsapp";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -34,6 +35,11 @@ app.use(
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
+
+// Webhook WhatsApp com limite maior (imagens de comprovante chegam como base64)
+app.use("/api/webhook/whatsapp", express.json({ limit: "50mb" }));
+app.use(whatsappRouter);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
