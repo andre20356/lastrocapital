@@ -20,7 +20,7 @@ type WaStep =
   | "nc_name" | "nc_phone" | "nc_document" | "nc_referral"
   | "qt_client" | "qt_select_client" | "qt_select_invoice" | "qt_type"
   | "cs_select_invoice"
-  | "cl_menu" | "cl_identify" | "cl_identify_multi" | "cl_payment_type" | "cl_await_comprovante";
+  | "cl_menu" | "cl_identify" | "cl_identify_multi" | "cl_post_contratos" | "cl_post_extrato" | "cl_payment_type" | "cl_await_comprovante";
 
 interface WaConvState {
   step: WaStep;
@@ -47,6 +47,42 @@ interface WaConvState {
 }
 
 const waConversations = new Map<string, WaConvState>();
+
+// Pagamentos pendentes aguardando confirmação do admin (via Telegram)
+export const pendingWaPayments = new Map<string, { phone: string; clientName: string }>();
+
+async function notifyAdminTelegramComprovante(payId: string, clientName: string, phone: string, imageBase64?: string): Promise<void> {
+  const token   = process.env["TELEGRAM_BOT_TOKEN"];
+  const adminId = process.env["TELEGRAM_ADMIN_CHAT_ID"];
+  if (!token || !adminId) return;
+  const caption = `📎 <b>Comprovante WhatsApp</b> de <b>${clientName}</b>\nNúmero: ${phone}\n\nDeseja confirmar o pagamento?`;
+  const replyMarkup = { inline_keyboard: [[
+    { text: "✅ Confirmar pagamento", callback_data: `wapy_yes:${payId}` },
+    { text: "❌ Recusar",             callback_data: `wapy_no:${payId}` },
+  ]] };
+  try {
+    if (imageBase64) {
+      const form = new FormData();
+      form.append("chat_id", adminId);
+      form.append("caption", caption);
+      form.append("parse_mode", "HTML");
+      form.append("reply_markup", JSON.stringify(replyMarkup));
+      const buffer = Buffer.from(imageBase64, "base64");
+      form.append("photo", new Blob([buffer], { type: "image/jpeg" }), "comprovante.jpg");
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+    } else {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: adminId, text: caption, parse_mode: "HTML", reply_markup: replyMarkup }),
+      });
+      if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+    }
+  } catch (e: any) {
+    logger.warn(`[WA] Falha ao notificar Telegram comprovante: ${e.message}`);
+  }
+}
 
 // ── Formatting (WhatsApp: *bold*, _italic_, sem HTML) ─────────────────────────
 
@@ -116,7 +152,10 @@ function phoneMatch(registered: string | null, waPhone: string): boolean {
   if (!registered) return false;
   const reg = normPhone(registered);
   const wa  = normPhone(waPhone);
-  return reg === wa || wa.endsWith(reg) || reg.endsWith(wa);
+  if (reg === wa || wa.endsWith(reg) || reg.endsWith(wa)) return true;
+  // Normaliza prefixo 9 do Brasil: 5519 9XXXXXXXX ↔ 5519 XXXXXXXX
+  const strip9 = (n: string) => n.replace(/^(55\d{2})9(\d{8})$/, "$1$2");
+  return strip9(reg) === strip9(wa);
 }
 
 // ── Lógica de negócio (igual ao Telegram, formato WhatsApp) ──────────────────
@@ -473,7 +512,7 @@ function calcClientTotalsWA(invoices: Array<typeof invoicesTable.$inferSelect>) 
   return { totalAmount, jurosAmount };
 }
 
-async function sendClientContratosWA(cfg: WaConfig, phone: string, clientId: number, clientName: string): Promise<void> {
+async function sendClientContratosWA(cfg: WaConfig, phone: string, clientId: number, clientName: string, companyId?: number): Promise<void> {
   const invoices = await db.select().from(invoicesTable)
     .where(eq(invoicesTable.clientId, clientId)).orderBy(invoicesTable.dueDate);
   if (invoices.length === 0) {
@@ -491,9 +530,12 @@ async function sendClientContratosWA(cfg: WaConfig, phone: string, clientId: num
   });
   msg += `${it("Para detalhes financeiros, escolha a opção 2 (Extrato).")}`;
   await sendWAChunked(cfg, phone, msg);
+  if (companyId) {
+    waConversations.set(phone, { step: "cl_post_contratos", isClientFlow: true, companyIdFilter: companyId, cl_clientId: clientId, cl_clientName: clientName });
+  }
 }
 
-async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: number, clientName: string): Promise<void> {
+async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: number, clientName: string, companyId?: number): Promise<void> {
   const invoices = await db.select().from(invoicesTable)
     .where(and(eq(invoicesTable.clientId, clientId), ne(invoicesTable.status, "paid")))
     .orderBy(invoicesTable.dueDate);
@@ -526,6 +568,9 @@ async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: numbe
   }
   msg += `━━━━━━━━━━━━━━━━━━━━\n💸 ${b(`Total em aberto: ${fmtBRL(totalAmount)}`)}\n\nDigite ${b("3")} para ver a opção de pagamento.`;
   await sendWAChunked(cfg, phone, msg);
+  if (companyId) {
+    waConversations.set(phone, { step: "cl_post_extrato", isClientFlow: true, companyIdFilter: companyId, cl_clientId: clientId, cl_clientName: clientName });
+  }
 }
 
 async function sendClientPaymentWA(cfg: WaConfig, phone: string, clientId: number, clientName: string, companyId: number): Promise<void> {
@@ -607,12 +652,12 @@ async function handleClientStepWA(
       const client = linked ?? linkedByPhone;
       const action: WaConvState["cl_action"] = input === "1" ? "contratos" : input === "2" ? "extrato" : "pagar";
       if (client) {
-        if (action === "contratos") await sendClientContratosWA(cfg, phone, client.id, client.name);
-        else if (action === "extrato") await sendClientExtratoWA(cfg, phone, client.id, client.name);
+        if (action === "contratos") await sendClientContratosWA(cfg, phone, client.id, client.name, companyId);
+        else if (action === "extrato") await sendClientExtratoWA(cfg, phone, client.id, client.name, companyId);
         else await sendClientPaymentWA(cfg, phone, client.id, client.name, companyId);
       } else {
         waConversations.set(phone, { step: "cl_identify", isClientFlow: true, companyIdFilter: companyId, cl_action: action });
-        await sendWA(cfg, phone, `🔍 Informe seu ${b("CPF")} ou ${b("nome completo")} cadastrado:`);
+        await sendWA(cfg, phone, `🔍 Informe seu ${b("nome")}, ${b("CPF")} ou ${b("telefone")} cadastrado:`);
       }
       break;
     }
@@ -627,10 +672,14 @@ async function handleClientStepWA(
         ? await db.select().from(clientsTable)
             .where(and(eq(clientsTable.companyId, companyId), ilike(clientsTable.name, `%${input}%`))).limit(10)
         : [];
-      const candidates = byDoc.length > 0 ? byDoc : byName;
+      // Busca por telefone: aceita formatos com ou sem DDD/DDI
+      const byPhone = byDoc.length === 0 && byName.length === 0 && digits.length >= 8
+        ? (await db.select().from(clientsTable).where(eq(clientsTable.companyId, companyId))).filter(c => phoneMatch(c.phone, digits))
+        : [];
+      const candidates = byDoc.length > 0 ? byDoc : byName.length > 0 ? byName : byPhone;
 
       if (candidates.length === 0) {
-        await sendWA(cfg, phone, `❌ Não encontrei nenhum cliente com essas informações.\n\nTente CPF ou nome completo.`);
+        await sendWA(cfg, phone, `❌ Não encontrei nenhum cliente com essas informações.\n\nTente seu nome, CPF ou telefone cadastrado.`);
         waConversations.delete(phone);
         return;
       }
@@ -660,9 +709,32 @@ async function handleClientStepWA(
       }
       waConversations.delete(phone);
       const action = state.cl_action ?? "contratos";
-      if (action === "contratos") await sendClientContratosWA(cfg, phone, found.id, found.name);
-      else if (action === "extrato") await sendClientExtratoWA(cfg, phone, found.id, found.name);
+      if (action === "contratos") await sendClientContratosWA(cfg, phone, found.id, found.name, companyId);
+      else if (action === "extrato") await sendClientExtratoWA(cfg, phone, found.id, found.name, companyId);
       else await sendClientPaymentWA(cfg, phone, found.id, found.name, companyId);
+      break;
+    }
+
+    case "cl_post_contratos": {
+      if (input === "2") {
+        waConversations.delete(phone);
+        await sendClientExtratoWA(cfg, phone, state.cl_clientId!, state.cl_clientName!, companyId);
+      } else if (input === "3") {
+        waConversations.delete(phone);
+        await sendClientPaymentWA(cfg, phone, state.cl_clientId!, state.cl_clientName!, companyId);
+      } else {
+        await sendWA(cfg, phone, `Digite ${b("2")} para extrato, ${b("3")} para pagamento ou ${b("/start")} para o menu.`);
+      }
+      break;
+    }
+
+    case "cl_post_extrato": {
+      if (input === "3") {
+        waConversations.delete(phone);
+        await sendClientPaymentWA(cfg, phone, state.cl_clientId!, state.cl_clientName!, companyId);
+      } else {
+        await sendWA(cfg, phone, `Digite ${b("3")} para ver opções de pagamento ou ${b("/start")} para voltar ao menu.`);
+      }
       break;
     }
 
@@ -919,233 +991,168 @@ async function handleConvStepWA(cfg: WaConfig, phone: string, text: string, stat
   }
 }
 
+// ── Comandos admin ────────────────────────────────────────────────────────────
+
+async function handleAdminCommandWA(cfg: WaConfig, phone: string, text: string): Promise<void> {
+  const parts  = text.trim().split(/\s+/);
+  const rawCmd = parts[0].toLowerCase();
+  const args   = parts.slice(1).join(" ");
+  const cId    = cfg.companyId;
+
+  switch (rawCmd) {
+    case "/resumo": {
+      const msg = await buildResumoWA(cId);
+      await sendWA(cfg, phone, msg);
+      break;
+    }
+    case "/vencidos": {
+      const msg = await buildVencidosWA(cId, args || undefined);
+      await sendWAChunked(cfg, phone, msg);
+      break;
+    }
+    case "/contrato":
+    case "/detalhes": {
+      const id = parseInt(args);
+      if (isNaN(id)) { await sendWA(cfg, phone, `❌ Use: /contrato 27`); break; }
+      const conds: any[] = [eq(invoicesTable.id, id)];
+      if (cId) conds.push(eq(invoicesTable.companyId, cId));
+      const [inv] = await db.select().from(invoicesTable).where(and(...conds)).limit(1);
+      if (!inv) { await sendWA(cfg, phone, `❌ Contrato #${id} não encontrado.`); break; }
+      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, inv.clientId)).limit(1);
+      const msg = buildInvoiceDetailWA(inv, client?.name ?? "—", client?.phone ?? undefined, client?.referralSource ?? undefined);
+      await sendWAChunked(cfg, phone, msg);
+      break;
+    }
+    case "/cliente": {
+      if (!args) { await sendWA(cfg, phone, `❌ Use: /cliente Lucas`); break; }
+      const msg = await buildClientMessageWA(args, cId);
+      await sendWAChunked(cfg, phone, msg);
+      break;
+    }
+    case "/novocliente": {
+      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
+      waConversations.set(phone, { step: "nc_name", companyIdFilter: cId });
+      await sendWA(cfg, phone, `👤 Nome do novo cliente:`);
+      break;
+    }
+    case "/cobranca": {
+      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
+      waConversations.set(phone, { step: "client", companyIdFilter: cId });
+      await sendWA(cfg, phone, `👤 Nome do cliente para a cobrança:`);
+      break;
+    }
+    case "/quitacao": {
+      if (!cId) { await sendWA(cfg, phone, `❌ Empresa não configurada.`); break; }
+      waConversations.set(phone, { step: "qt_client", companyIdFilter: cId });
+      await sendWA(cfg, phone, `👤 Nome do cliente para registrar pagamento:`);
+      break;
+    }
+    case "/cancelar":
+      await sendWA(cfg, phone, `Nenhuma operação em andamento.`);
+      break;
+    case "/ajuda":
+    case "/help":
+      await sendWA(cfg, phone, AJUDA_WA);
+      break;
+    default: {
+      // /<nome> — atalho de busca de cliente
+      if (rawCmd.startsWith("/") && rawCmd.length > 1) {
+        const name = rawCmd.slice(1);
+        const msg = await buildClientMessageWA(name, cId);
+        await sendWAChunked(cfg, phone, msg);
+        break;
+      }
+      await sendWA(cfg, phone, `❓ Comando não reconhecido. Digite /ajuda para ver os comandos.`);
+    }
+  }
+}
+
 // ── Webhook principal ─────────────────────────────────────────────────────────
 
 export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promise<void> {
   try {
     const event = payload?.event as string | undefined;
-
-    // Apenas mensagens recebidas
     if (event !== "messages.upsert") return;
 
     const data = payload?.data;
     if (!data) return;
 
-    // Ignora mensagens enviadas por nós mesmos
+    const jid = data.key?.remoteJid as string | undefined;
+    if (!jid || jid.endsWith("@g.us")) return;
+
+    // Ignora mensagens do próprio bot
     if (data.key?.fromMe === true) return;
 
-    const jid  = data.key?.remoteJid as string | undefined;
-    if (!jid || jid.endsWith("@g.us")) return; // ignora grupos
+    const isLid     = jid.endsWith("@lid");
+    const pushName: string = data.pushName ?? "";
 
-    const senderPhone = jidToPhone(jid);
+    // Resolve o telefone do remetente
+    let senderPhone: string;
+    if (isLid) {
+      let found: string | null = null;
+      if (cfg.companyId && pushName) {
+        const rows = await db.select({ phone: clientsTable.phone })
+          .from(clientsTable)
+          .where(and(eq(clientsTable.companyId, cfg.companyId), ilike(clientsTable.name, `%${pushName}%`)))
+          .limit(1);
+        found = rows[0]?.phone ?? null;
+      }
+      senderPhone = found ? normPhone(found) : jid;
+    } else {
+      senderPhone = jidToPhone(jid);
+    }
 
-    // Extrai texto da mensagem
     const text: string =
       data.message?.conversation ??
       data.message?.extendedTextMessage?.text ??
       "";
-
     const hasMedia = !!(data.message?.imageMessage || data.message?.documentMessage || data.message?.audioMessage);
 
-    const isClientMode = !!cfg.companyId && !!cfg.companyChatId && senderPhone !== normPhone(cfg.adminPhone);
+    const isAdmin = phoneMatch(cfg.adminPhone, senderPhone);
 
-    // ── Comprovante de cliente ──────────────────────────────────────────────
-    if (hasMedia && isClientMode) {
+    // Comprovante de pagamento enviado pelo cliente
+    if (hasMedia) {
       const activeConv = waConversations.get(senderPhone);
       if (activeConv?.step === "cl_await_comprovante") {
         const clName = activeConv.cl_clientName ?? "cliente";
         waConversations.delete(senderPhone);
         await sendWA(cfg, senderPhone, `✅ Comprovante recebido!\n\nSeu pagamento está sendo processado. Em breve você receberá a confirmação. 🙏`);
-        if (cfg.companyChatId) {
-          await sendWA(cfg, cfg.companyChatId, `📎 ${b("Comprovante recebido")} de ${b(clName)}!\nNúmero: ${senderPhone}`);
-        }
-        return;
+        const payId = `wapay_${Date.now()}`;
+        pendingWaPayments.set(payId, { phone: senderPhone, clientName: clName });
+        const imageBase64 = data.message?.base64 as string | undefined;
+        await notifyAdminTelegramComprovante(payId, clName, senderPhone, imageBase64);
       }
-      if (isClientMode) return; // ignora outras mídias de cliente
+      return;
     }
 
     if (!text) return;
 
-    // ── Conversa em andamento ───────────────────────────────────────────────
+    // Conversa em andamento
     const activeConv = waConversations.get(senderPhone);
     if (activeConv) {
-      if (isClientMode || activeConv.isClientFlow) {
-        await handleClientStepWA(cfg, senderPhone, text, activeConv, cfg.companyId ?? activeConv.companyIdFilter ?? 0);
-      } else {
+      if (isAdmin && !activeConv.isClientFlow) {
         await handleConvStepWA(cfg, senderPhone, text, activeConv);
+      } else {
+        await handleClientStepWA(cfg, senderPhone, text, activeConv, cfg.companyId ?? activeConv.companyIdFilter ?? 0);
       }
       return;
     }
 
+    // Admin: roteamento de comandos
+    if (isAdmin) {
+      await handleAdminCommandWA(cfg, senderPhone, text);
+      return;
+    }
+
+    // Cliente: só ativa com /start
     const rawCmd = text.trim().split(/\s+/)[0].toLowerCase();
-    const isVencidos = rawCmd === "/vencidos" || rawCmd === "/vencido" ||
-      rawCmd.startsWith("/vencidos") || rawCmd.startsWith("/vencido");
+    if (rawCmd !== "/start") return;
 
-    // ── MODO CLIENTE ────────────────────────────────────────────────────────
-    if (isClientMode) {
-      if (rawCmd === "/start" || rawCmd === "/ajuda" || rawCmd === "/help" || text.trim().toLowerCase() === "menu") {
-        const menuMsg = await buildClientMenuMsgWA(cfg.companyId!);
-        await sendWA(cfg, senderPhone, menuMsg);
-        waConversations.set(senderPhone, { step: "cl_menu", isClientFlow: true, companyIdFilter: cfg.companyId });
-      } else if (text.trim() === "1" || text.trim() === "2" || text.trim() === "3") {
-        const fakeState: WaConvState = { step: "cl_menu", isClientFlow: true, companyIdFilter: cfg.companyId };
-        waConversations.set(senderPhone, fakeState);
-        await handleClientStepWA(cfg, senderPhone, text, fakeState, cfg.companyId!);
-      } else {
-        // Mensagem livre → repassa ao admin
-        const [linked] = await db.select({ name: clientsTable.name, phone: clientsTable.phone })
-          .from(clientsTable)
-          .where(and(eq(clientsTable.companyId, cfg.companyId!), eq(clientsTable.telegramChatId, senderPhone))).limit(1);
-        const senderName = linked?.name ?? `WhatsApp ${senderPhone}`;
-        if (cfg.companyChatId) {
-          await sendWA(cfg, cfg.companyChatId, `💬 ${b(senderName)} | ${senderPhone}:\n${text}`);
-        }
-        await sendWA(cfg, senderPhone, `✅ Mensagem recebida! Nossa equipe entrará em contato em breve.`);
-      }
-      return;
-    }
+    if (!cfg.companyId) return;
+    const menuMsg = await buildClientMenuMsgWA(cfg.companyId);
+    await sendWA(cfg, senderPhone, menuMsg);
+    waConversations.set(senderPhone, { step: "cl_menu", isClientFlow: true, companyIdFilter: cfg.companyId });
 
-    // ── MODO ADMIN ──────────────────────────────────────────────────────────
-    if (rawCmd === "/ajuda" || rawCmd === "/help" || rawCmd === "/start") {
-      await sendWA(cfg, senderPhone, AJUDA_WA);
-
-    } else if (rawCmd === "/resumo") {
-      const msg = await buildResumoWA(cfg.companyId);
-      await sendWA(cfg, senderPhone, msg);
-
-    } else if (rawCmd === "/contrato" || rawCmd === "/detalhes") {
-      const idStr = text.trim().slice(rawCmd.length).trim().replace(/^#/, "");
-      const id = parseInt(idStr, 10);
-      if (isNaN(id) || id <= 0) {
-        await sendWA(cfg, senderPhone, `❌ Informe o número do contrato.\nEx: /contrato 27`);
-      } else {
-        const conds: any[] = [eq(invoicesTable.id, id)];
-        if (cfg.companyId) conds.push(eq(invoicesTable.companyId, cfg.companyId));
-        const [row] = await db
-          .select({ invoice: invoicesTable, clientName: clientsTable.name, clientPhone: clientsTable.phone, clientRef: clientsTable.referralSource })
-          .from(invoicesTable).leftJoin(clientsTable, eq(invoicesTable.clientId, clientsTable.id))
-          .where(and(...conds));
-        if (!row) {
-          await sendWA(cfg, senderPhone, `❌ Contrato #${id} não encontrado.`);
-        } else {
-          const msg = buildInvoiceDetailWA(row.invoice, row.clientName ?? "—", row.clientPhone ?? undefined, row.clientRef ?? undefined);
-          await sendWAChunked(cfg, senderPhone, msg);
-        }
-      }
-
-    } else if (rawCmd === "/cliente") {
-      const clientName = text.trim().slice(rawCmd.length).trim();
-      if (!clientName) {
-        await sendWA(cfg, senderPhone, `❌ Informe o nome.\nEx: /cliente Lucas`);
-      } else {
-        const msg = await buildClientMessageWA(clientName, cfg.companyId);
-        await sendWAChunked(cfg, senderPhone, msg);
-      }
-
-    } else if (isVencidos) {
-      const prefix = rawCmd.startsWith("/vencidos") ? "/vencidos" : "/vencido";
-      const referral = (rawCmd.slice(prefix.length) + " " + text.trim().slice(rawCmd.length)).trim() || undefined;
-      const msg = await buildVencidosWA(cfg.companyId, referral);
-      await sendWAChunked(cfg, senderPhone, msg);
-
-    } else if (rawCmd === "/novocliente") {
-      const cId = cfg.companyId;
-      if (!cId) { await sendWA(cfg, senderPhone, `❌ Empresa não configurada.`); return; }
-      waConversations.set(senderPhone, { step: "nc_name", companyIdFilter: cId });
-      await sendWA(cfg, senderPhone, `👤 ${b("Novo Cliente")}\n\nDigite o nome completo:\n\n${it("/cancelar para abortar")}`);
-
-    } else if (rawCmd === "/cobranca") {
-      const cId = cfg.companyId;
-      if (!cId) { await sendWA(cfg, senderPhone, `❌ Empresa não configurada.`); return; }
-      waConversations.set(senderPhone, { step: "client", companyIdFilter: cId });
-      await sendWA(cfg, senderPhone, `📝 ${b("Nova Cobrança")}\n\nDigite o nome do cliente:\n\n${it("/cancelar para abortar")}`);
-
-    } else if (rawCmd === "/quitacao") {
-      const cId = cfg.companyId;
-      if (!cId) { await sendWA(cfg, senderPhone, `❌ Empresa não configurada.`); return; }
-      waConversations.set(senderPhone, { step: "qt_client", companyIdFilter: cId });
-      await sendWA(cfg, senderPhone, `💳 ${b("Registrar Pagamento")}\n\nDigite o nome do cliente:\n\n${it("/cancelar para abortar")}`);
-
-    } else if (rawCmd === "/cancelar") {
-      waConversations.delete(senderPhone);
-      await sendWA(cfg, senderPhone, `Nenhuma operação em andamento.`);
-
-    } else if (rawCmd.startsWith("/") && rawCmd.length > 1) {
-      // /<nome> — atalho de busca por cliente
-      const inlinePart = rawCmd.slice(1);
-      const spacePart  = text.trim().slice(rawCmd.length).trim();
-      const clientName = (inlinePart + (spacePart ? " " + spacePart : "")).trim();
-      if (!clientName) return;
-
-      const clientConds: any[] = [ilike(clientsTable.name, `%${clientName}%`)];
-      if (cfg.companyId) clientConds.push(eq(clientsTable.companyId, cfg.companyId));
-      const clients = await db.select().from(clientsTable).where(and(...clientConds)).orderBy(clientsTable.name);
-
-      if (clients.length === 0) {
-        await sendWA(cfg, senderPhone, `❌ Nenhum cliente encontrado com o nome ${b(clientName)}.`);
-      } else if (clients.length === 1) {
-        const client = clients[0];
-        const invoices = await db.select().from(invoicesTable)
-          .where(eq(invoicesTable.clientId, client.id)).orderBy(invoicesTable.dueDate);
-        if (invoices.length <= 1) {
-          const msg = await buildClientMessageWA(clientName, cfg.companyId);
-          await sendWAChunked(cfg, senderPhone, msg);
-        } else {
-          const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-          const phoneTag = client.phone ? ` | ${client.phone}` : "";
-          const refTag = client.referralSource && client.referralSource !== "invite_link" ? `\n🔗 Indicação: ${client.referralSource}` : "";
-          const overdueCount = invoices.filter(i => i.status === "overdue").reduce((sum, i) => {
-            if (!i.dueDate) return sum + 1;
-            const dl = Math.max(0, Math.floor((today.getTime() - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-            return sum + Math.max(1, Math.floor(dl / 30));
-          }, 0);
-          const overdueTag = overdueCount > 0 ? ` | ⚠️ ${b(`${overdueCount} parcela${overdueCount > 1 ? "s" : ""} em atraso`)}` : "";
-          const header = `👤 ${b(client.name)}${phoneTag}${refTag}\n📋 ${b(`${invoices.length} contratos`)}${overdueTag} — escolha um:\n\n`;
-
-          const blocks = invoices.map((inv, i) => {
-            const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
-            const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
-            const principal = parseFloat(inv.amount ?? "0") || 0;
-            const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
-            const daysLate = inv.status === "overdue" && due
-              ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-            const multa = feePerDay * daysLate;
-            const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
-            const numTag = i < NUM_EMOJI.length ? NUM_EMOJI[i] : `${i + 1}.`;
-            let block = `${numTag} ${b(statusLabel)} — ${dueFmt}\n💰 Principal: ${fmtBRL(principal)}`;
-            if (daysLate > 0) block += `\n⏳ ${daysLate} dias de atraso`;
-            if (multa > 0)    block += `\n⚠️ Multa: ${fmtBRL(multa)}`;
-            block += `\n\n📝 ${b("Observação:")}\n`;
-            block += inv.notes ? inv.notes : "Nenhuma observação cadastrada.";
-            if (inv.notes && inv.notesUpdatedAt) {
-              const d = new Date(inv.notesUpdatedAt);
-              block += `\n${it(`Atualizado em ${d.toLocaleDateString("pt-BR", { timeZone: "UTC" })}`)}`;
-            }
-            block += `\n\n────────────────────`;
-            return block;
-          });
-
-          const footer = `\nDigite o número do contrato ou /cancelar:`;
-          waConversations.set(senderPhone, { step: "cs_select_invoice", companyIdFilter: cfg.companyId, cs_clientName: client.name, cs_clientPhone: client.phone ?? undefined, cs_clientRef: client.referralSource ?? undefined, cs_invoices: invoices });
-
-          let currentMsg = header;
-          for (let b2 = 0; b2 < blocks.length; b2++) {
-            const isLast = b2 === blocks.length - 1;
-            const chunk = blocks[b2] + (isLast ? footer : "\n\n");
-            if (currentMsg !== header && currentMsg.length + chunk.length > 3500) {
-              await sendWA(cfg, senderPhone, currentMsg.trimEnd());
-              currentMsg = chunk;
-            } else {
-              currentMsg += chunk;
-            }
-          }
-          if (currentMsg.trim()) await sendWA(cfg, senderPhone, currentMsg.trimEnd());
-        }
-      } else {
-        const msg = await buildClientMessageWA(clientName, cfg.companyId);
-        await sendWAChunked(cfg, senderPhone, msg);
-      }
-    }
   } catch (e: any) {
     logger.error({ err: e }, "[WA] Erro ao processar webhook");
   }
