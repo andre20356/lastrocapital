@@ -1,5 +1,5 @@
 import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTable } from "@workspace/db";
-import { eq, and, ilike, ne, or } from "drizzle-orm";
+import { eq, and, ilike, ne, or, sql as drizzleSql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -156,6 +156,20 @@ function phoneMatch(registered: string | null, waPhone: string): boolean {
   // Normaliza prefixo 9 do Brasil: 5519 9XXXXXXXX ↔ 5519 XXXXXXXX
   const strip9 = (n: string) => n.replace(/^(55\d{2})9(\d{8})$/, "$1$2");
   return strip9(reg) === strip9(wa);
+}
+
+// Busca cliente por telefone diretamente no SQL (sem full table scan em JS).
+// Compara os últimos 8 dígitos do telefone normalizado — suficiente para casar
+// formatos com/sem DDI e com/sem o 9 do celular brasileiro.
+async function findClientsByPhoneSQL(companyId: number, waPhone: string) {
+  const last8 = normPhone(waPhone).slice(-8);
+  if (last8.length < 8) return [];
+  return db.select().from(clientsTable).where(
+    and(
+      eq(clientsTable.companyId, companyId),
+      drizzleSql`RIGHT(REGEXP_REPLACE(${clientsTable.phone}, '[^0-9]', '', 'g'), 8) = ${last8}`,
+    ),
+  ).limit(5);
 }
 
 // ── Lógica de negócio (igual ao Telegram, formato WhatsApp) ──────────────────
@@ -643,13 +657,12 @@ async function handleClientStepWA(
         return;
       }
       waConversations.delete(phone);
-      const [linked] = await db.select().from(clientsTable)
-        .where(and(eq(clientsTable.companyId, companyId), eq(clientsTable.telegramChatId, phone))).limit(1);
-      // Tenta também por número de telefone
-      const linkedByPhone = !linked
-        ? (await db.select().from(clientsTable).where(eq(clientsTable.companyId, companyId))).find(c => phoneMatch(c.phone, phone))
-        : null;
-      const client = linked ?? linkedByPhone;
+      const [[linked], linkedByPhoneRows] = await Promise.all([
+        db.select().from(clientsTable)
+          .where(and(eq(clientsTable.companyId, companyId), eq(clientsTable.telegramChatId, phone))).limit(1),
+        findClientsByPhoneSQL(companyId, phone),
+      ]);
+      const client = linked ?? linkedByPhoneRows[0];
       const action: WaConvState["cl_action"] = input === "1" ? "contratos" : input === "2" ? "extrato" : "pagar";
       if (client) {
         if (action === "contratos") await sendClientContratosWA(cfg, phone, client.id, client.name, companyId);
@@ -674,7 +687,7 @@ async function handleClientStepWA(
         : [];
       // Busca por telefone: aceita formatos com ou sem DDD/DDI
       const byPhone = byDoc.length === 0 && byName.length === 0 && digits.length >= 8
-        ? (await db.select().from(clientsTable).where(eq(clientsTable.companyId, companyId))).filter(c => phoneMatch(c.phone, digits))
+        ? await findClientsByPhoneSQL(companyId, digits)
         : [];
       const candidates = byDoc.length > 0 ? byDoc : byName.length > 0 ? byName : byPhone;
 

@@ -1441,29 +1441,29 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             const payId = cbData.slice("wapy_yes:".length);
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
-            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
-              `✅ <b>Pagamento confirmado!</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`);
-            if (pending) {
-              const waCfg = buildWaConfig();
-              if (waCfg) {
-                await sendWA(waCfg, pending.phone,
-                  `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n✅ *Pagamento Confirmado!*\n\nOlá, ${pending.clientName}! 😊\n\nSeu pagamento foi recebido e *confirmado com sucesso!* 🎉\n\nAgradecemos pela sua confiança na *Lastro Capital*. 💚\n\nEm caso de dúvidas, estamos à disposição.`);
-              }
-            }
+            const waCfgYes = pending ? buildWaConfig() : null;
+            await Promise.all([
+              editMsgRemoveButtons(token, cbChatId, cbMsgId,
+                `✅ <b>Pagamento confirmado!</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
+              waCfgYes && pending
+                ? sendWA(waCfgYes, pending.phone,
+                    `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n✅ *Pagamento Confirmado!*\n\nOlá, ${pending.clientName}! 😊\n\nSeu pagamento foi recebido e *confirmado com sucesso!* 🎉\n\nAgradecemos pela sua confiança na *Lastro Capital*. 💚\n\nEm caso de dúvidas, estamos à disposição.`)
+                : Promise.resolve(),
+            ]);
 
           } else if (cbData.startsWith("wapy_no:") && cbChatId && cbMsgId) {
             const payId = cbData.slice("wapy_no:".length);
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
-            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
-              `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`);
-            if (pending) {
-              const waCfg = buildWaConfig();
-              if (waCfg) {
-                await sendWA(waCfg, pending.phone,
-                  `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ *Atenção*\n\nOlá, ${pending.clientName}!\n\nNão conseguimos identificar o seu pagamento no sistema.\n\nPor favor, entre em contato com nossa *administração* para verificar e regularizar sua situação.\n\nEstamos aqui para te ajudar. 💚`);
-              }
-            }
+            const waCfgNo = pending ? buildWaConfig() : null;
+            await Promise.all([
+              editMsgRemoveButtons(token, cbChatId, cbMsgId,
+                `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
+              waCfgNo && pending
+                ? sendWA(waCfgNo, pending.phone,
+                    `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ *Atenção*\n\nOlá, ${pending.clientName}!\n\nNão conseguimos identificar o seu pagamento no sistema.\n\nPor favor, entre em contato com nossa *administração* para verificar e regularizar sua situação.\n\nEstamos aqui para te ajudar. 💚`)
+                : Promise.resolve(),
+            ]);
           }
           continue;
         }
