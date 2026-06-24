@@ -1078,9 +1078,10 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
       return;
     }
 
-    // Clientes: só ativa com /start
+    // Clientes: ativa com /start ou "menu"
     const rawCmd = text.trim().split(/\s+/)[0].toLowerCase();
-    if (rawCmd !== "/start") return;
+    const normalizedText = text.trim().toLowerCase();
+    if (rawCmd !== "/start" && normalizedText !== "menu") return;
 
     if (!cfg.companyId) return;
     const menuMsg = await buildClientMenuMsgWA(cfg.companyId);
