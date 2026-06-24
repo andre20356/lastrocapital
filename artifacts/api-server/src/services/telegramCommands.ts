@@ -97,14 +97,19 @@ async function answerCallback(token: string, callbackQueryId: string, text: stri
 }
 
 async function editMsgRemoveButtons(token: string, chatId: number | string, messageId: number, newText: string): Promise<void> {
+  // Tenta editMessageText (mensagens de texto); se falhar (ex: mensagem de foto), usa editMessageCaption
+  const base = { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: [] } };
   try {
-    await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId, message_id: messageId, text: newText,
-        parse_mode: "HTML", reply_markup: { inline_keyboard: [] },
-      }),
+    const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...base, text: newText }),
+    });
+    if (res.ok) return;
+  } catch {}
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/editMessageCaption`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...base, caption: newText }),
     });
   } catch {}
 }
