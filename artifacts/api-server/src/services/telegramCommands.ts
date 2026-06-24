@@ -1442,12 +1442,50 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             const payId = cbData.slice("wapy_yes:".length);
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
+
+            // Atualiza faturas no banco (mesma lógica do pay_yes)
+            let paidCount = 0;
+            if (pending?.clientId) {
+              const pendingInvoices = await db.select().from(invoicesTable)
+                .where(and(eq(invoicesTable.clientId, pending.clientId), ne(invoicesTable.status, "paid")));
+              const cfCompanyId = pending.companyId;
+              for (const inv of pendingInvoices) {
+                await db.update(invoicesTable).set({ status: "paid" }).where(eq(invoicesTable.id, inv.id));
+                const principal = inv.amount != null ? parseFloat(inv.amount) : 0;
+                if (principal > 0 && cfCompanyId) {
+                  await db.insert(cashFlowTable).values({
+                    companyId: cfCompanyId, type: "income",
+                    amount: String(principal.toFixed(2)),
+                    description: `Quitação via WhatsApp — ${pending.clientName} (Cobrança #${inv.id})`,
+                    category: "cobranças", date: new Date(),
+                  });
+                }
+                if (inv.status === "overdue" && cfCompanyId) {
+                  const rate   = parseFloat(inv.interestRate ?? "0") || 0;
+                  const feeDay = parseFloat(inv.lateFee ?? "0") || 0;
+                  const days   = inv.daysLate ?? 0;
+                  const juros  = (principal * rate) / 100 + feeDay * days;
+                  if (juros > 0) {
+                    await db.insert(cashFlowTable).values({
+                      companyId: cfCompanyId, type: "income",
+                      amount: String(juros.toFixed(2)),
+                      description: `Juros/multa via WhatsApp — ${pending.clientName} (Cobrança #${inv.id})`,
+                      category: "juros", date: new Date(),
+                    });
+                  }
+                  await db.update(debtsTable).set({ status: "closed" })
+                    .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+                }
+              }
+              paidCount = pendingInvoices.length;
+            }
+
             const waCfgYes = pending ? (pending.instance
               ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
               : buildWaConfig()) : null;
             await Promise.all([
               editMsgRemoveButtons(token, cbChatId, cbMsgId,
-                `✅ <b>Pagamento confirmado!</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
+                `✅ <b>Pagamento confirmado!</b> ${paidCount > 0 ? `${paidCount} fatura(s) de ` : ""}${pending?.clientName ?? "Cliente"} marcadas como pagas e notificado via WhatsApp.`),
               waCfgYes && pending
                 ? sendWA(waCfgYes, pending.phone,
                     `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n✅ *Pagamento Confirmado!*\n\nOlá, ${pending.clientName}! 😊\n\nSeu pagamento foi recebido e *confirmado com sucesso!* 🎉\n\nAgradecemos pela sua confiança na *Lastro Capital*. 💚\n\nEm caso de dúvidas, estamos à disposição.`)

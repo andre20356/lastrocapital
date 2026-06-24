@@ -52,7 +52,7 @@ const waConversations = new Map<string, WaConvState>();
 const processedMsgIds = new Set<string>();
 
 // Pagamentos pendentes aguardando confirmação do admin (via Telegram)
-export const pendingWaPayments = new Map<string, { phone: string; clientName: string; instance: string; companyId?: number }>();
+export const pendingWaPayments = new Map<string, { phone: string; clientName: string; clientId?: number; instance: string; companyId?: number }>();
 
 async function notifyAdminTelegramComprovante(payId: string, clientName: string, phone: string, imageBase64?: string): Promise<void> {
   const token   = process.env["TELEGRAM_BOT_TOKEN"];
@@ -1070,7 +1070,7 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
         waConversations.delete(senderPhone);
         await sendWA(cfg, senderPhone, `✅ Comprovante recebido!\n\nSeu pagamento está sendo processado. Em breve você receberá a confirmação. 🙏`);
         const payId = `wapay_${Date.now()}`;
-        pendingWaPayments.set(payId, { phone: senderPhone, clientName: clName, instance: cfg.instance, companyId: cfg.companyId });
+        pendingWaPayments.set(payId, { phone: senderPhone, clientName: clName, clientId: activeConv.cl_clientId, instance: cfg.instance, companyId: cfg.companyId });
         const imageBase64 = data.message?.base64 as string | undefined;
         await notifyAdminTelegramComprovante(payId, clName, senderPhone, imageBase64);
       } else {
