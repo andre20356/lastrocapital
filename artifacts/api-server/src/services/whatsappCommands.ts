@@ -709,8 +709,8 @@ async function handleClientStepWA(
       const client = candidates[0];
       waConversations.delete(phone);
       const action = state.cl_action ?? "contratos";
-      if (action === "contratos") await sendClientContratosWA(cfg, phone, client.id, client.name);
-      else if (action === "extrato") await sendClientExtratoWA(cfg, phone, client.id, client.name);
+      if (action === "contratos") await sendClientContratosWA(cfg, phone, client.id, client.name, companyId);
+      else if (action === "extrato") await sendClientExtratoWA(cfg, phone, client.id, client.name, companyId);
       else await sendClientPaymentWA(cfg, phone, client.id, client.name, companyId);
       break;
     }
