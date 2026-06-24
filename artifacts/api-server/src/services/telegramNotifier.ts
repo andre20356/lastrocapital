@@ -124,6 +124,7 @@ export async function checkDueDateNotifications(): Promise<void> {
       const clientMsg =
         `${icon} Olá, <b>${r.clientName ?? "cliente"}</b>!\n\n` +
         `Seu pagamento de <b>${valor}</b> ${venceTexto}.\n\n` +
+        `Use /start para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
         `Qualquer dúvida, entre em contato conosco. 😊`;
 
       await sendTelegram(r.companyBotToken!, r.clientTelegramChatId!, clientMsg);
@@ -156,6 +157,7 @@ export async function checkDueDateNotifications(): Promise<void> {
         const clientMsg =
           `${icon} Olá, *${r.clientName ?? "cliente"}*!\n\n` +
           `Seu pagamento de *${valor}* ${venceTexto}.\n\n` +
+          `Responda *menu* para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
           `Qualquer dúvida, entre em contato conosco. 😊`;
 
         const clientPhone = r.clientPhone!.replace(/\D/g, "");
