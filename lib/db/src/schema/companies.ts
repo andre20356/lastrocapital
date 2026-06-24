@@ -14,6 +14,8 @@ export const companiesTable = pgTable("companies", {
   pixKeyType: text("pix_key_type"),
   pixRecipientName: text("pix_recipient_name"),
   pixBankName: text("pix_bank_name"),
+  whatsappInstance: text("whatsapp_instance"),
+  whatsappStatus: text("whatsapp_status").notNull().default("disconnected"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

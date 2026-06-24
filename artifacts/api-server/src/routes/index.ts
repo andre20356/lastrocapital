@@ -9,6 +9,7 @@ import dashboardRouter from "./dashboard";
 import inviteRouter from "./invite";
 import subscriptionsRouter from "./subscriptions";
 import webhooksRouter from "./webhooks";
+import { connectivityRouter } from "./connectivity";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireActiveSubscription } from "../middlewares/requireActiveSubscription";
 
@@ -19,6 +20,7 @@ router.use(companiesRouter);
 router.use(inviteRouter);
 router.use(webhooksRouter);
 router.use(subscriptionsRouter);
+router.use(connectivityRouter);
 
 const subscriptionProtectedPaths = [
   "/clients",

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Users, ArrowRightLeft, FileText, Landmark, LogOut, CreditCard, Sun, Moon, ShieldCheck, X, CalendarDays, RefreshCw, Settings } from "lucide-react";
+import { LayoutDashboard, Users, ArrowRightLeft, FileText, Landmark, LogOut, CreditCard, Sun, Moon, ShieldCheck, X, CalendarDays, RefreshCw, Wifi, Settings } from "lucide-react";
 import { useClerk } from "@clerk/react";
 import { useTheme } from "@/hooks/use-theme";
 import { useGetMySubscription } from "@workspace/api-client-react";
@@ -10,6 +10,7 @@ const navItems = [
   { href: "/cashflow", label: "Fluxo de Caixa", icon: ArrowRightLeft },
   { href: "/invoices", label: "Cobranças", icon: FileText },
   { href: "/debts", label: "Dívidas", icon: Landmark },
+  { href: "/connectivity", label: "Conectividade", icon: Wifi },
   { href: "/planos", label: "Planos", icon: CreditCard },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];

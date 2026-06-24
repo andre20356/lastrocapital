@@ -19,6 +19,7 @@ import Debts from "./pages/debts";
 import InvitePage from "./pages/invite";
 import Planos from "./pages/planos";
 import Settings from "./pages/settings";
+import ConnectivityPage from "./pages/connectivity";
 import NotFound from "./pages/not-found";
 
 // Module-level navigate ref — set by NavigateSync inside the router
@@ -242,6 +243,11 @@ function ClerkProviderWithRoutes() {
 
             <Route path="/planos">
               <Show when="signed-in"><ProtectedRoute component={Planos} /></Show>
+              <Show when="signed-out"><Redirect to="/" /></Show>
+            </Route>
+
+            <Route path="/connectivity">
+              <Show when="signed-in"><ProtectedRoute component={ConnectivityPage} /></Show>
               <Show when="signed-out"><Redirect to="/" /></Show>
             </Route>
 

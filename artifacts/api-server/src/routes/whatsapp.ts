@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { eq } from "drizzle-orm";
+import { db, companiesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { handleWhatsAppWebhook, getWhatsAppQR, type WaConfig } from "../services/whatsappCommands";
 
@@ -18,9 +20,32 @@ function buildConfig(): WaConfig | null {
 router.post("/api/webhook/whatsapp", async (req, res) => {
   res.status(200).json({ ok: true });
 
-  const cfg = buildConfig();
+  const instanceName = req.body?.instance as string | undefined;
+
+  // Multi-tenant: roteia por instância
+  let cfg: WaConfig | null = null;
+  if (instanceName && instanceName !== process.env.WHATSAPP_INSTANCE) {
+    const [company] = await db
+      .select()
+      .from(companiesTable)
+      .where(eq(companiesTable.whatsappInstance, instanceName))
+      .limit(1);
+
+    if (company) {
+      cfg = {
+        apiUrl: process.env.EVOLUTION_SERVER_URL!,
+        apiKey: process.env.EVOLUTION_API_KEY!,
+        instance: instanceName,
+        adminPhone: process.env.WHATSAPP_ADMIN_PHONE!,
+        companyId: company.id,
+      };
+    }
+  } else {
+    cfg = buildConfig();
+  }
+
   if (!cfg) {
-    logger.warn("[WA] Variáveis de ambiente não configuradas — webhook ignorado");
+    logger.warn("[WA] Variáveis de ambiente não configuradas ou instância não encontrada — webhook ignorado");
     return;
   }
 

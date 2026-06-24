@@ -1337,13 +1337,14 @@ async function resolveSingleCompany(token: string, chatId: number): Promise<numb
   return undefined;
 }
 
-async function pollBot(token: string, companyId: number | undefined, label: string, companyChatId?: string): Promise<void> {
+async function pollBot(token: string, companyId: number | undefined, label: string, companyChatId?: string, signal?: AbortSignal): Promise<void> {
   let offset = 0;
 
-  while (true) {
+  while (!signal?.aborted) {
     try {
       const res = await fetch(
         `https://api.telegram.org/bot${token}/getUpdates?timeout=30&offset=${offset}&allowed_updates=%5B%22message%22%2C%22callback_query%22%5D`,
+        { signal: signal ?? undefined },
       );
 
       if (!res.ok) {
@@ -1741,6 +1742,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
         }
       }
     } catch (e: any) {
+      if (signal?.aborted) return;
       logger.warn(`[TelegramCmd] Erro no poll (${label}): ${e.message}`);
       await new Promise((r) => setTimeout(r, 5_000));
     }
@@ -1749,12 +1751,23 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
 
 const activeTokens = new Set<string>();
 
+// Mapa de controllers para parar polling por empresa
+const botControllers = new Map<number, AbortController>();
+
+export function stopCompanyBotPolling(companyId: number, oldToken?: string): void {
+  const ctrl = botControllers.get(companyId);
+  if (ctrl) { ctrl.abort(); botControllers.delete(companyId); }
+  if (oldToken) activeTokens.delete(oldToken);
+}
+
 export function startCompanyBotPolling(token: string, companyId: number, companyName: string, companyChatId?: string): void {
   const adminToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!token || token === adminToken || activeTokens.has(token)) return;
   activeTokens.add(token);
+  const ctrl = new AbortController();
+  botControllers.set(companyId, ctrl);
   logger.info(`[TelegramCmd] Iniciando polling — empresa "${companyName}"`);
-  pollBot(token, companyId, `empresa "${companyName}"`, companyChatId).catch(() => {});
+  pollBot(token, companyId, `empresa "${companyName}"`, companyChatId, ctrl.signal).catch(() => {});
 }
 
 export function startTelegramCommandPolling(): void {

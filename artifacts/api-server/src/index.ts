@@ -30,7 +30,7 @@ app.listen(port, (err) => {
   const scheduleDaily = () => {
     const now   = new Date();
     const next  = new Date();
-    next.setHours(8, 0, 0, 0);          // 08:00 BRT (UTC-3 → 11:00 UTC)
+    next.setHours(8, 0, 0, 0);
     if (next <= now) next.setDate(next.getDate() + 1);
     const delay = next.getTime() - now.getTime();
     setTimeout(() => {
