@@ -7,7 +7,6 @@ import {
   getListInvoicesQueryKey,
   useListClients,
   getListClientsQueryKey,
-  useListCashFlow,
 } from "@workspace/api-client-react";
 import type { Invoice, Client } from "@workspace/api-client-react";
 import { useUser } from "@clerk/react";
@@ -99,18 +98,8 @@ export default function Dashboard() {
     })
     .slice(0, 8);
 
-  // Saldo Líquido = soma das entradas de juros recebidos (cashflow income, category=juros) no mês atual
-  const { data: jurosEntries } = useListCashFlow({ type: "income", category: "juros" });
-  const nowDash = new Date();
-  const thisMonthDash = nowDash.getMonth();
-  const thisYearDash = nowDash.getFullYear();
-  const jurosPagosMes = (jurosEntries ?? [])
-    .filter((entry) => {
-      if (!entry.date) return true;
-      const d = new Date(entry.date);
-      return d.getMonth() === thisMonthDash && d.getFullYear() === thisYearDash;
-    })
-    .reduce((sum: number, entry) => sum + Number(entry.amount ?? 0), 0);
+  // Saldo Líquido = totalIncome - totalExpenses (calculado no backend sobre o cashFlowTable)
+  const netBalance = summary ? summary.netBalance : 0;
 
   const formattedDaily = (dailyData ?? []).map((d) => ({
     ...d,
@@ -234,9 +223,9 @@ export default function Dashboard() {
               </div>
               <p className="text-muted-foreground text-xs mb-1">Saldo Líquido</p>
               <p className="text-xl md:text-2xl font-bold text-emerald-400">
-                {formatCurrency(jurosPagosMes)}
+                {formatCurrency(netBalance)}
               </p>
-              <p className="text-xs text-muted-foreground/60 mt-1">juros recebidos este mês</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">entradas menos saídas</p>
             </div>
           </div>
         )}

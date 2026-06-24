@@ -66,47 +66,41 @@ export default function CashFlow() {
     },
   });
 
-  const totalExpense = entries?.filter((e) => e.type === "expense").reduce((s, e) => s + Number(e.amount), 0) ?? 0;
-
-  // Recuperado = soma dos valores principais de cobranças quitadas (pagas) no mês atual
-  const { data: paidInvoices } = useListInvoices({ status: "paid" });
   const now = new Date();
   const thisMonth = now.getMonth();
   const thisYear = now.getFullYear();
 
-  const recuperado = (paidInvoices ?? []).reduce((sum, inv) => {
-    if (!inv.dueDate) return sum + (inv.amount ?? 0);
-    const due = new Date(inv.dueDate);
-    if (due.getMonth() === thisMonth && due.getFullYear() === thisYear) {
-      return sum + (inv.amount ?? 0);
-    }
-    return sum;
-  }, 0);
+  const allEntries = entries ?? [];
 
-  // Resultado Operacional = soma dos juros de cobranças pendentes/em dia com vencimento no mês atual
+  // Recuperado = entradas (income) no mês atual pelo cashflow (data real do lançamento)
+  const recuperado = allEntries
+    .filter((e) => {
+      if (e.type !== "income") return false;
+      if (!e.date) return false;
+      const d = new Date(e.date);
+      return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+    })
+    .reduce((s, e) => s + Number(e.amount), 0);
+
+  // Emprestado = saídas (expense) no mês atual
+  const totalExpense = allEntries
+    .filter((e) => {
+      if (e.type !== "expense") return false;
+      if (!e.date) return false;
+      const d = new Date(e.date);
+      return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+    })
+    .reduce((s, e) => s + Number(e.amount), 0);
+
+  // Emprestado total na rua (todas as cobranças ativas)
   const { data: pendingInvoices } = useListInvoices({ status: "pending" });
   const { data: currentInvoices } = useListInvoices({ status: "current" });
   const { data: requestedInvoices } = useListInvoices({ status: "requested" });
-
-  const allActiveInvoices = [
-    ...(pendingInvoices ?? []),
-    ...(currentInvoices ?? []),
-    ...(requestedInvoices ?? []),
-  ];
-
-  // Emprestado = total de todos os valores ativos na rua (todos os clientes)
+  const allActiveInvoices = [...(pendingInvoices ?? []), ...(currentInvoices ?? []), ...(requestedInvoices ?? [])];
   const totalEmprestado = allActiveInvoices.reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
 
-  const activeDueThisMonth = allActiveInvoices.filter((inv) => {
-    if (!inv.dueDate) return false;
-    const due = new Date(inv.dueDate);
-    return due.getMonth() === thisMonth && due.getFullYear() === thisYear;
-  });
-
-  const resultadoOperacional = activeDueThisMonth.reduce((sum, inv) => {
-    const interest = ((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100;
-    return sum + interest;
-  }, 0);
+  // Resultado Operacional = recuperado - saídas do mês
+  const resultadoOperacional = recuperado - totalExpense;
 
   const onSubmit = (data: CashFlowFormData) => {
     createEntry.mutate(
@@ -213,7 +207,7 @@ export default function CashFlow() {
               {formatCurrency(resultadoOperacional)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              juros previstos este mês ({activeDueThisMonth.length} cobranças)
+              entradas menos saídas este mês
             </p>
           </CardContent>
         </Card>
