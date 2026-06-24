@@ -1443,40 +1443,34 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
 
-            // Atualiza faturas no banco (mesma lógica do pay_yes)
+            // Atualiza faturas no banco e lança no fluxo de caixa
             let paidCount = 0;
             if (pending?.clientId) {
               const pendingInvoices = await db.select().from(invoicesTable)
                 .where(and(eq(invoicesTable.clientId, pending.clientId), ne(invoicesTable.status, "paid")));
               const cfCompanyId = pending.companyId;
+
+              // Marca todas as faturas como pagas e fecha débitos vencidos
               for (const inv of pendingInvoices) {
                 await db.update(invoicesTable).set({ status: "paid" }).where(eq(invoicesTable.id, inv.id));
-                const principal = inv.amount != null ? parseFloat(inv.amount) : 0;
-                if (principal > 0 && cfCompanyId) {
-                  await db.insert(cashFlowTable).values({
-                    companyId: cfCompanyId, type: "income",
-                    amount: String(principal.toFixed(2)),
-                    description: `Quitação via WhatsApp — ${pending.clientName} (Cobrança #${inv.id})`,
-                    category: "cobranças", date: new Date(),
-                  });
-                }
-                if (inv.status === "overdue" && cfCompanyId) {
-                  const rate   = parseFloat(inv.interestRate ?? "0") || 0;
-                  const feeDay = parseFloat(inv.lateFee ?? "0") || 0;
-                  const days   = inv.daysLate ?? 0;
-                  const juros  = (principal * rate) / 100 + feeDay * days;
-                  if (juros > 0) {
-                    await db.insert(cashFlowTable).values({
-                      companyId: cfCompanyId, type: "income",
-                      amount: String(juros.toFixed(2)),
-                      description: `Juros/multa via WhatsApp — ${pending.clientName} (Cobrança #${inv.id})`,
-                      category: "juros", date: new Date(),
-                    });
-                  }
+                if (inv.status === "overdue") {
                   await db.update(debtsTable).set({ status: "closed" })
                     .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
                 }
               }
+
+              // Lança UMA entrada no caixa com o valor exato que o cliente pagou (totalAmount do bot)
+              // Isso evita discrepâncias por juros recalculados — o valor mostrado ao cliente é o correto.
+              if (cfCompanyId && pendingInvoices.length > 0) {
+                const valorPago = pending.totalAmount ?? pendingInvoices.reduce((s, inv) => s + (parseFloat(inv.amount ?? "0") || 0), 0);
+                await db.insert(cashFlowTable).values({
+                  companyId: cfCompanyId, type: "income",
+                  amount: String(valorPago.toFixed(2)),
+                  description: `Quitação via WhatsApp — ${pending.clientName}`,
+                  category: "cobranças", date: new Date(),
+                });
+              }
+
               paidCount = pendingInvoices.length;
             }
 
