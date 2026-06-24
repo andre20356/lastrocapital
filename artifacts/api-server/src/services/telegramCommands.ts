@@ -1442,7 +1442,9 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             const payId = cbData.slice("wapy_yes:".length);
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
-            const waCfgYes = pending ? buildWaConfig() : null;
+            const waCfgYes = pending ? (pending.instance
+              ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
+              : buildWaConfig()) : null;
             await Promise.all([
               editMsgRemoveButtons(token, cbChatId, cbMsgId,
                 `✅ <b>Pagamento confirmado!</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
@@ -1456,7 +1458,9 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             const payId = cbData.slice("wapy_no:".length);
             const pending = pendingWaPayments.get(payId);
             pendingWaPayments.delete(payId);
-            const waCfgNo = pending ? buildWaConfig() : null;
+            const waCfgNo = pending ? (pending.instance
+              ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
+              : buildWaConfig()) : null;
             await Promise.all([
               editMsgRemoveButtons(token, cbChatId, cbMsgId,
                 `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
