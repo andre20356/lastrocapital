@@ -1025,30 +1025,19 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
     // Ignora mensagens do próprio bot
     if (data.key?.fromMe === true) return;
 
-    const isLid     = jid.endsWith("@lid");
-    const pushName: string = data.pushName ?? "";
+    // Evolution API envia o mesmo evento duas vezes: uma com @lid e outra com o número real.
+    // Ignorar @lid garante que senderPhone seja sempre um número válido para sendWA.
+    if (jid.endsWith("@lid")) return;
 
-    // Resolve o telefone do remetente
-    let senderPhone: string;
-    if (isLid) {
-      let found: string | null = null;
-      if (cfg.companyId && pushName) {
-        const rows = await db.select({ phone: clientsTable.phone })
-          .from(clientsTable)
-          .where(and(eq(clientsTable.companyId, cfg.companyId), ilike(clientsTable.name, `%${pushName}%`)))
-          .limit(1);
-        found = rows[0]?.phone ?? null;
-      }
-      senderPhone = found ? normPhone(found) : jid;
-    } else {
-      senderPhone = jidToPhone(jid);
-    }
+    const senderPhone = jidToPhone(jid);
 
     const text: string =
       data.message?.conversation ??
       data.message?.extendedTextMessage?.text ??
       "";
     const hasMedia = !!(data.message?.imageMessage || data.message?.documentMessage || data.message?.audioMessage);
+
+    logger.info({ senderPhone, event, hasMedia, hasText: !!text, convStep: waConversations.get(senderPhone)?.step ?? "none" }, "[WA] webhook recebido");
 
     // Comprovante de pagamento enviado pelo cliente
     if (hasMedia) {
@@ -1061,6 +1050,8 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
         pendingWaPayments.set(payId, { phone: senderPhone, clientName: clName });
         const imageBase64 = data.message?.base64 as string | undefined;
         await notifyAdminTelegramComprovante(payId, clName, senderPhone, imageBase64);
+      } else {
+        logger.warn({ senderPhone, convStep: activeConv?.step ?? "none" }, "[WA] imagem ignorada — sem estado cl_await_comprovante");
       }
       return;
     }
@@ -1101,7 +1092,7 @@ export async function initWhatsAppInstance(cfg: WaConfig, webhookUrl: string): P
       return;
     }
     const instances = (await listRes.json()) as any[];
-    const exists = Array.isArray(instances) && instances.some((i: any) => i.instance?.instanceName === cfg.instance);
+    const exists = Array.isArray(instances) && instances.some((i: any) => (i.name ?? i.instance?.instanceName) === cfg.instance);
 
     if (!exists) {
       logger.info(`[WA] Criando instância "${cfg.instance}"...`);
