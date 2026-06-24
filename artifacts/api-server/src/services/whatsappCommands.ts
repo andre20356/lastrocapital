@@ -48,6 +48,9 @@ interface WaConvState {
 
 const waConversations = new Map<string, WaConvState>();
 
+// Dedup: mesma mensagem pode chegar duas vezes (versão @lid + versão real phone)
+const processedMsgIds = new Set<string>();
+
 // Pagamentos pendentes aguardando confirmação do admin (via Telegram)
 export const pendingWaPayments = new Map<string, { phone: string; clientName: string }>();
 
@@ -1035,14 +1038,21 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
     const jid = data.key?.remoteJid as string | undefined;
     if (!jid || jid.endsWith("@g.us")) return;
 
-    // Ignora mensagens do próprio bot
+    // Ignora mensagens enviadas pelo próprio bot
     if (data.key?.fromMe === true) return;
 
-    // Evolution API envia o mesmo evento duas vezes: uma com @lid e outra com o número real.
-    // Ignorar @lid garante que senderPhone seja sempre um número válido para sendWA.
-    if (jid.endsWith("@lid")) return;
+    // Dedup: Evolution API pode entregar o mesmo evento duas vezes (@lid + real phone).
+    // Processa apenas a primeira versão que chegar; a segunda é descartada pelo msgId.
+    const msgId = data.key?.id as string | undefined;
+    if (msgId) {
+      if (processedMsgIds.has(msgId)) return;
+      processedMsgIds.add(msgId);
+      setTimeout(() => processedMsgIds.delete(msgId), 60_000);
+    }
 
-    const senderPhone = jidToPhone(jid);
+    // Para @lid: usa o JID completo como identificador (Evolution aceita @lid no sendText).
+    // Para real phone: extrai apenas os dígitos.
+    const senderPhone = jid.endsWith("@lid") ? jid : jidToPhone(jid);
 
     const text: string =
       data.message?.conversation ??
