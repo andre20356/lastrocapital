@@ -166,9 +166,11 @@ export default function Clients() {
   const overdueByClient = (overdueInvoices ?? []).reduce<Record<number, { principal: number; interest: number; lateFees: number }>>((acc, inv) => {
     const cid = inv.clientId;
     if (!acc[cid]) acc[cid] = { principal: 0, interest: 0, lateFees: 0 };
+    const daysL = inv.daysLate ?? 0;
+    const mesesL = daysL > 0 ? Math.max(1, Math.floor(daysL / 30)) : 1;
     acc[cid].principal += inv.amount ?? 0;
-    acc[cid].interest += ((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100;
-    acc[cid].lateFees += (inv.lateFee ?? 0) * (inv.daysLate ?? 0);
+    acc[cid].interest += (((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100) * mesesL;
+    acc[cid].lateFees += (inv.lateFee ?? 0) * daysL;
     return acc;
   }, {});
 

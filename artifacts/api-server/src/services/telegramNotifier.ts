@@ -121,9 +121,17 @@ export async function checkDueDateNotifications(): Promise<void> {
           ? `vence <b>amanhã</b> (${dueFmt})`
           : `vence em <b>${label}</b> (${dueFmt})`;
 
+      const alerteHoje = days === 0
+        ? `⚠️ <b>Atenção:</b> pagamentos realizados após o vencimento estão sujeitos a multa e juros de mora. Regularize hoje e evite encargos adicionais.\n\n`
+        : "";
+
       const clientMsg =
+        `━━━━━━━━━━━━━━━━━━━\n` +
+        `  🏦 <b>LASTRO CAPITAL</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━\n\n` +
         `${icon} Olá, <b>${r.clientName ?? "cliente"}</b>!\n\n` +
         `Seu pagamento de <b>${valor}</b> ${venceTexto}.\n\n` +
+        alerteHoje +
         `Use /start para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
         `Qualquer dúvida, entre em contato conosco. 😊`;
 
@@ -154,9 +162,17 @@ export async function checkDueDateNotifications(): Promise<void> {
             ? `vence *amanhã* (${dueFmt})`
             : `vence em *${label}* (${dueFmt})`;
 
+        const alerteHojeWa = days === 0
+          ? `⚠️ *Atenção:* pagamentos realizados após o vencimento estão sujeitos a multa e juros de mora. Regularize hoje e evite encargos adicionais.\n\n`
+          : "";
+
         const clientMsg =
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `  🏦 *LASTRO CAPITAL*\n` +
+          `━━━━━━━━━━━━━━━━━━━\n\n` +
           `${icon} Olá, *${r.clientName ?? "cliente"}*!\n\n` +
           `Seu pagamento de *${valor}* ${venceTexto}.\n\n` +
+          alerteHojeWa +
           `Responda *menu* para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
           `Qualquer dúvida, entre em contato conosco. 😊`;
 

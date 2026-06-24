@@ -93,7 +93,8 @@ function calcBreakdown(amount: string, interestRate: string, lateFee: string, da
   const rate = parseFloat(interestRate) || 0;
   const feePerDay = parseBRL(lateFee);
   const days = parseInt(daysLate) || 0;
-  const interestAmount = (principal * rate) / 100;
+  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
+  const interestAmount = ((principal * rate) / 100) * monthsLate;
   const lateFeeTotal = feePerDay * days;
   return { principal, interestAmount, lateFeeTotal, total: principal + interestAmount + lateFeeTotal };
 }
@@ -518,16 +519,11 @@ export default function Invoices() {
 
   const payInterestInvoice = payInterestId !== null ? invoices?.find((i) => i.id === payInterestId) : null;
   const payInterestAmount = payInterestInvoice
-    ? ((payInterestInvoice.amount ?? 0) * (payInterestInvoice.interestRate ?? 0)) / 100
-      + (payInterestInvoice.lateFee ?? 0) * (payInterestInvoice.daysLate ?? 0)
+    ? ((payInterestInvoice.totalDue ?? payInterestInvoice.amount ?? 0) - (payInterestInvoice.amount ?? 0))
     : 0;
 
   const quitacaoInvoice = quitacaoId !== null ? invoices?.find((i) => i.id === quitacaoId) : null;
-  const quitacaoTotal = quitacaoInvoice
-    ? (quitacaoInvoice.amount ?? 0)
-      + ((quitacaoInvoice.amount ?? 0) * (quitacaoInvoice.interestRate ?? 0)) / 100
-      + (quitacaoInvoice.lateFee ?? 0) * (quitacaoInvoice.daysLate ?? 0)
-    : 0;
+  const quitacaoTotal = quitacaoInvoice?.totalDue ?? quitacaoInvoice?.amount ?? 0;
 
   // KPI counts — always from full unfiltered data
   const { data: allInvoices } = useListInvoices(undefined, { query: { queryKey: getListInvoicesQueryKey() } });
@@ -734,8 +730,10 @@ export default function Invoices() {
                     const hasInterest = (inv.interestRate ?? 0) > 0;
                     const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
                     const isOverdueWithFees = isOverdue && hasCharges;
-                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate) / 100 : 0;
-                    const lateFeeTotal = (inv.lateFee ?? 0) * (inv.daysLate ?? 0);
+                    const daysLateCalc = inv.daysLate ?? 0;
+                    const monthsLateCalc = daysLateCalc > 0 ? Math.max(1, Math.floor(daysLateCalc / 30)) : 1;
+                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * monthsLateCalc : 0;
+                    const lateFeeTotal = (inv.lateFee ?? 0) * daysLateCalc;
                     const alreadyPaidInterest = inv.interestPaid === true;
                     const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
                     const StatusIcon = cfg?.icon ?? FileText;
@@ -775,7 +773,7 @@ export default function Invoices() {
                                 <span className="font-bold text-destructive tabular-nums">{formatCurrency(inv.totalDue)}</span>
                                 <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
                                   {(inv.interestRate ?? 0) > 0 && (
-                                    <div>Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}</div>
+                                    <div>Juros {inv.interestRate}%/mês × {monthsLateCalc} {monthsLateCalc > 1 ? "meses" : "mês"} = {formatCurrency(interestAmt)}</div>
                                   )}
                                   {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
                                     <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>

@@ -26,12 +26,12 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 
-  // Cron diário de notificações de vencimento via Telegram (08:00 BRT)
+  // Cron diário de notificações de vencimento via Telegram (08:00 BRT = 11:00 UTC)
   const scheduleDaily = () => {
     const now   = new Date();
     const next  = new Date();
-    next.setHours(8, 0, 0, 0);
-    if (next <= now) next.setDate(next.getDate() + 1);
+    next.setUTCHours(11, 0, 0, 0);
+    if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
     const delay = next.getTime() - now.getTime();
     setTimeout(() => {
       checkDueDateNotifications().catch((e) =>
