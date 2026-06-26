@@ -8,33 +8,31 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@clerk/react";
 
-interface ConnectivityStatus {
-  whatsapp: {
-    status: "connected" | "disconnected" | "connecting";
-    phone: string | null;
-    profileName: string | null;
-    instance: string | null;
-  };
-  telegram: {
-    status: "connected" | "disconnected";
-    botUsername: string | null;
-    chatId: string | null;
-  };
-}
+type WaStatus = "connected" | "disconnected" | "connecting";
+type ConnectMode = "idle" | "qr" | "pairing";
 
 export default function ConnectivityPage() {
   const { toast } = useToast();
   const { getToken } = useAuth();
 
   // WhatsApp state
-  const [waStatus, setWaStatus] = useState<"connected" | "disconnected" | "connecting">("disconnected");
+  const [waStatus, setWaStatus] = useState<WaStatus>("disconnected");
   const [waPhone, setWaPhone] = useState<string | null>(null);
   const [waProfileName, setWaProfileName] = useState<string | null>(null);
   const [waInstance, setWaInstance] = useState<string | null>(null);
-  const [waQrcode, setWaQrcode] = useState<string | null>(null);
   const [waLoading, setWaLoading] = useState(false);
   const [waDisconnecting, setWaDisconnecting] = useState(false);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // QR code state
+  const [waQrcode, setWaQrcode] = useState<string | null>(null);
+  const [qrCountdown, setQrCountdown] = useState(30);
+
+  // Pairing code state
+  const [connectMode, setConnectMode] = useState<ConnectMode>("idle");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingCountdown, setPairingCountdown] = useState(40);
 
   // Telegram state
   const [tgToken, setTgToken] = useState("");
@@ -43,6 +41,10 @@ export default function ConnectivityPage() {
   const [tgBotUsername, setTgBotUsername] = useState<string | null>(null);
   const [tgSaving, setTgSaving] = useState(false);
   const [tgTesting, setTgTesting] = useState(false);
+
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qrTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pairingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const authFetch = useCallback(async (url: string, opts: RequestInit = {}) => {
     const jwt = await getToken();
@@ -79,55 +81,137 @@ export default function ConnectivityPage() {
       .catch(() => {});
   }, [authFetch]);
 
-  // Poll WA status when connecting
+  // Poll connection status when connecting (QR or pairing)
   useEffect(() => {
-    if (waStatus === "connecting") {
-      pollingRef.current = setInterval(async () => {
-        try {
-          const d = await authFetch("/api/connectivity/whatsapp/status") as any;
-          if (d.status === "connected") {
-            setWaStatus("connected");
-            setWaPhone(d.phone);
-            setWaProfileName(d.profileName);
-            setWaQrcode(null);
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            toast({ title: "WhatsApp conectado!", description: d.profileName ?? d.phone ?? "Conexão estabelecida." });
-          } else if (d.status === "disconnected") {
-            setWaStatus("disconnected");
-            setWaQrcode(null);
-            if (pollingRef.current) clearInterval(pollingRef.current);
-          } else {
-            // Still connecting — refresh QR
-            const qrData = await authFetch("/api/connectivity/whatsapp/qr") as any;
-            if (qrData.qrcode) setWaQrcode(qrData.qrcode);
-          }
-        } catch {
-          // ignore polling errors
-        }
-      }, 3000);
-    } else {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+    if (waStatus !== "connecting") {
+      if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+      return;
     }
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [waStatus, authFetch, toast]);
 
+    pollingRef.current = setInterval(async () => {
+      try {
+        const d = await authFetch("/api/connectivity/whatsapp/status") as any;
+        if (d.status === "connected") {
+          setWaStatus("connected");
+          setWaPhone(d.phone);
+          setWaProfileName(d.profileName);
+          setWaQrcode(null);
+          setPairingCode(null);
+          setConnectMode("idle");
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          toast({ title: "WhatsApp conectado!", description: d.profileName ?? d.phone ?? "Conexão estabelecida." });
+        } else if (d.status === "disconnected") {
+          setWaStatus("disconnected");
+          setWaQrcode(null);
+          setPairingCode(null);
+          setConnectMode("idle");
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        } else if (connectMode === "qr") {
+          // Só atualiza QR no modo QR — não interfere no modo pairing
+          const qrData = await authFetch("/api/connectivity/whatsapp/qr") as any;
+          if (qrData.qrcode) setWaQrcode(qrData.qrcode);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 4000);
+
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, [waStatus, connectMode, authFetch, toast]);
+
+  // Countdown + auto-refresh do QR code (30s)
+  const doQrRefreshRef = useRef(async () => {});
+  doQrRefreshRef.current = async () => {
+    try {
+      const qrData = await authFetch("/api/connectivity/whatsapp/qr") as any;
+      if (qrData.qrcode) { setWaQrcode(qrData.qrcode); setQrCountdown(30); }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (connectMode !== "qr" || !waQrcode) {
+      if (qrTimerRef.current) clearInterval(qrTimerRef.current);
+      setQrCountdown(30);
+      return;
+    }
+    setQrCountdown(30);
+    qrTimerRef.current = setInterval(() => {
+      setQrCountdown(prev => {
+        if (prev <= 1) { doQrRefreshRef.current(); return 30; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (qrTimerRef.current) clearInterval(qrTimerRef.current); };
+  }, [connectMode, !!waQrcode]);
+
+  // Countdown + auto-refresh do pairing code (40s)
+  const doPairingRefreshRef = useRef(async () => {});
+  doPairingRefreshRef.current = async () => {
+    try {
+      const d = await authFetch("/api/connectivity/whatsapp/pairing-code") as any;
+      if (d.code) { setPairingCode(d.code); setPairingCountdown(40); }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (connectMode !== "pairing" || !pairingCode) {
+      if (pairingTimerRef.current) clearInterval(pairingTimerRef.current);
+      setPairingCountdown(40);
+      return;
+    }
+    setPairingCountdown(40);
+    pairingTimerRef.current = setInterval(() => {
+      setPairingCountdown(prev => {
+        if (prev <= 1) { doPairingRefreshRef.current(); return 40; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (pairingTimerRef.current) clearInterval(pairingTimerRef.current); };
+  }, [connectMode, !!pairingCode]);
+
+  // Conectar via QR code
   const handleWaConnect = async () => {
     setWaLoading(true);
     try {
       const d = await authFetch("/api/connectivity/whatsapp/connect", { method: "POST" }) as any;
       setWaInstance(d.instance);
       setWaStatus("connecting");
+      setConnectMode("qr");
       if (d.qrcode) setWaQrcode(d.qrcode);
       toast({ title: "Escaneie o QR code", description: "Abra o WhatsApp e escaneie o código." });
     } catch (e: any) {
       toast({ title: "Erro ao conectar", description: e?.message, variant: "destructive" });
     } finally {
       setWaLoading(false);
+    }
+  };
+
+  // Conectar via código de pareamento
+  const handleWaPairingCode = async () => {
+    if (!phoneInput.trim()) return;
+    setPairingLoading(true);
+    try {
+      const d = await authFetch("/api/connectivity/whatsapp/pairing-code", {
+        method: "POST",
+        body: JSON.stringify({ phoneNumber: phoneInput }),
+      }) as any;
+      setPairingCode(d.code);
+      setWaStatus("connecting");
+      toast({ title: "Código gerado!", description: "Digite-o no WhatsApp em até 40 segundos." });
+    } catch (e: any) {
+      toast({ title: "Erro ao gerar código", description: e?.message, variant: "destructive" });
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  // Refresh manual do pairing code
+  const handleRefreshCode = async () => {
+    try {
+      const d = await authFetch("/api/connectivity/whatsapp/pairing-code") as any;
+      if (d.code) { setPairingCode(d.code); setPairingCountdown(40); }
+    } catch (e: any) {
+      toast({ title: "Erro ao atualizar código", description: e?.message, variant: "destructive" });
     }
   };
 
@@ -140,6 +224,9 @@ export default function ConnectivityPage() {
       setWaProfileName(null);
       setWaInstance(null);
       setWaQrcode(null);
+      setPairingCode(null);
+      setConnectMode("idle");
+      setPhoneInput("");
       toast({ title: "WhatsApp desconectado." });
     } catch (e: any) {
       toast({ title: "Erro ao desconectar", description: e?.message, variant: "destructive" });
@@ -156,7 +243,6 @@ export default function ConnectivityPage() {
         body: JSON.stringify({ telegramBotToken: tgToken, telegramChatId: tgChatId }),
       });
       toast({ title: "Telegram salvo!", description: "Configurações atualizadas." });
-      // Refresh status
       const d = await authFetch("/api/connectivity") as any;
       setTgStatus(d.telegram.status);
       setTgBotUsername(d.telegram.botUsername);
@@ -223,6 +309,8 @@ export default function ConnectivityPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+
+            {/* Conectado */}
             {waStatus === "connected" && (
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 space-y-1 dark:bg-emerald-950/20 dark:border-emerald-900">
                 {waProfileName && (
@@ -239,52 +327,147 @@ export default function ConnectivityPage() {
               </div>
             )}
 
-            {waStatus === "connecting" && (
+            {/* Desconectado — escolha do modo */}
+            {waStatus === "disconnected" && connectMode === "idle" && (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Escaneie o QR code abaixo com o WhatsApp do número que deseja conectar:
+                  Escolha como deseja conectar o WhatsApp da sua empresa:
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => { setConnectMode("qr"); handleWaConnect(); }}
+                    disabled={waLoading}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left disabled:opacity-50"
+                  >
+                    <span className="text-2xl">📷</span>
+                    <div>
+                      <p className="text-sm font-medium">QR Code</p>
+                      <p className="text-xs text-muted-foreground">Escanear com o celular</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setConnectMode("pairing")}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-left"
+                  >
+                    <span className="text-2xl">#️⃣</span>
+                    <div>
+                      <p className="text-sm font-medium">Código</p>
+                      <p className="text-xs text-muted-foreground">Vincular pelo número</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Modo QR */}
+            {connectMode === "qr" && waStatus === "connecting" && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Abra o WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar aparelho</strong> → escaneie:
                 </p>
                 {waQrcode ? (
-                  <div className="flex justify-center">
+                  <div className="flex flex-col items-center gap-2">
                     <img
                       src={waQrcode.startsWith("data:") ? waQrcode : `data:image/png;base64,${waQrcode}`}
                       alt="QR Code WhatsApp"
                       className="w-56 h-56 rounded-lg border"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      QR renova em <span className="font-semibold text-foreground">{qrCountdown}s</span>
+                    </p>
                   </div>
                 ) : (
                   <div className="flex justify-center items-center w-56 h-56 mx-auto rounded-lg border bg-muted/30">
                     <span className="text-sm text-muted-foreground">Aguardando QR code...</span>
                   </div>
                 )}
-                <p className="text-xs text-center text-muted-foreground">
-                  O QR code é atualizado automaticamente. Aguarde após escanear.
-                </p>
               </div>
             )}
 
-            {waStatus === "disconnected" && (
-              <p className="text-sm text-muted-foreground">
-                Clique em conectar para gerar um QR code e vincular o WhatsApp da sua empresa.
-              </p>
+            {/* Modo Pairing — entrada do número */}
+            {connectMode === "pairing" && !pairingCode && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Digite o número do WhatsApp que deseja conectar (com DDI + DDD):
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    value={phoneInput}
+                    onChange={e => setPhoneInput(e.target.value.replace(/\D/g, ""))}
+                    placeholder="5519999999999"
+                    className="font-mono"
+                    maxLength={15}
+                    onKeyDown={e => { if (e.key === "Enter" && phoneInput.length >= 10) handleWaPairingCode(); }}
+                  />
+                  <Button
+                    onClick={handleWaPairingCode}
+                    disabled={phoneInput.length < 10 || pairingLoading}
+                    className="shrink-0"
+                  >
+                    {pairingLoading ? "Gerando..." : "Gerar código"}
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground text-xs"
+                  onClick={() => setConnectMode("idle")}
+                >
+                  ← Voltar
+                </Button>
+              </div>
             )}
 
-            <div className="flex gap-2 pt-1">
-              {waStatus === "disconnected" && (
-                <Button onClick={handleWaConnect} disabled={waLoading} className="flex-1">
-                  {waLoading ? "Conectando..." : "Conectar WhatsApp"}
-                </Button>
-              )}
-              {waStatus === "connecting" && (
-                <>
-                  <Button variant="outline" onClick={handleWaDisconnect} disabled={waDisconnecting} className="flex-1">
-                    Cancelar
+            {/* Modo Pairing — exibição do código */}
+            {connectMode === "pairing" && pairingCode && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 text-center space-y-3">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                    Código de pareamento
+                  </p>
+                  <p className="text-4xl font-mono font-bold tracking-[0.3em] text-primary">
+                    {pairingCode}
+                  </p>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>No WhatsApp: <span className="text-foreground font-medium">Aparelhos conectados</span></p>
+                    <p>→ <span className="text-foreground font-medium">Vincular com número de telefone</span></p>
+                    <p>→ Digite o código acima</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground/70">
+                    Código renova em <span className="font-semibold text-foreground">{pairingCountdown}s</span>
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleRefreshCode}
+                  >
+                    Atualizar código
                   </Button>
-                </>
-              )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground"
+                    onClick={() => { setPairingCode(null); setPhoneInput(""); }}
+                  >
+                    Trocar número
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Ações */}
+            <div className="flex gap-2 pt-1">
               {waStatus === "connected" && (
                 <Button variant="destructive" onClick={handleWaDisconnect} disabled={waDisconnecting} className="flex-1">
                   {waDisconnecting ? "Desconectando..." : "Desconectar"}
+                </Button>
+              )}
+              {waStatus === "connecting" && (
+                <Button variant="outline" onClick={handleWaDisconnect} disabled={waDisconnecting} className="flex-1">
+                  Cancelar
                 </Button>
               )}
             </div>

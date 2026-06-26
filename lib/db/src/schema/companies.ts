@@ -16,6 +16,7 @@ export const companiesTable = pgTable("companies", {
   pixBankName: text("pix_bank_name"),
   whatsappInstance: text("whatsapp_instance"),
   whatsappStatus: text("whatsapp_status").notNull().default("disconnected"),
+  whatsappPhone: text("whatsapp_phone"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

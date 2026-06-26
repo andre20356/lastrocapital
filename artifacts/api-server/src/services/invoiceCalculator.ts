@@ -5,6 +5,14 @@ export interface InvoiceLike {
   lateFee: string | null;
   daysLate?: number | null;
   interestPaid?: boolean | null;
+  recurrence?: string | null;
+}
+
+const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+
+function periodsLate(days: number, recurrence: string | null | undefined): number {
+  const divisor = PERIOD_DAYS[recurrence ?? "monthly"] ?? 30;
+  return days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
 }
 
 export interface InvoiceBreakdown {
@@ -27,8 +35,8 @@ export function calculateInvoiceBreakdown(invoice: InvoiceLike): InvoiceBreakdow
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
 
-  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
-  const interestAmount = ((principal * rate) / 100) * monthsLate;
+  const periods = periodsLate(days, invoice.recurrence);
+  const interestAmount = ((principal * rate) / 100) * periods;
   const lateFeeTotal = feePerDay * days;
   const total = principal + interestAmount + lateFeeTotal;
 
@@ -47,8 +55,8 @@ export function calculateInterestOnly(invoice: InvoiceLike): number {
   const rate = parseFloat(invoice.interestRate ?? "0") || 0;
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
-  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
-  return ((principal * rate) / 100) * monthsLate + feePerDay * days;
+  const periods = periodsLate(days, invoice.recurrence);
+  return ((principal * rate) / 100) * periods + feePerDay * days;
 }
 
 export interface EmprestimoSemanal {

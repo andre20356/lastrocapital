@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
-import { db, invoicesTable, clientsTable, debtsTable, cashFlowTable } from "@workspace/db";
+import { db, invoicesTable, clientsTable, debtsTable, cashFlowTable, companiesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import {
   CreateInvoiceBody,
@@ -13,6 +13,7 @@ import {
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { calculateInvoiceTotal, calculateInterestOnly } from "../services/invoiceCalculator";
 import { checkInvoiceLimit } from "../services/planLimits";
+import { sendWA } from "../services/whatsappCommands";
 
 const router = Router();
 
@@ -205,7 +206,13 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
 
     let interestAmountPaid = 0;
     if (parsed.data.interestPaid === true && !existingInvoice.interestPaid) {
-      interestAmountPaid = calculateInterestOnly(existingInvoice);
+      let realDaysLate = existingInvoice.daysLate ?? 0;
+      if (existingInvoice.status === "overdue" && existingInvoice.dueDate) {
+        const due = new Date(existingInvoice.dueDate + "T00:00:00Z");
+        const now = new Date(); now.setUTCHours(0, 0, 0, 0);
+        realDaysLate = Math.max(0, Math.floor((now.getTime() - due.getTime()) / 86_400_000));
+      }
+      interestAmountPaid = calculateInterestOnly({ ...existingInvoice, daysLate: realDaysLate });
     }
 
     const updateData: any = {};
@@ -292,10 +299,28 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
               });
             }
           }
+          // Registra juros/multa no cashflow antes do return (fatura recorrente avançada)
+          if (interestAmountPaid > 0) {
+            await db.insert(cashFlowTable).values({
+              companyId: req.companyId,
+              type: "income",
+              amount: String(interestAmountPaid.toFixed(2)),
+              description: `Juros/multa pagos — Cobrança #${invoice.id}`,
+              category: "juros",
+              date: new Date(),
+            });
+          }
           const [clientRowAdv] = await db.select().from(clientsTable).where(eq(clientsTable.id, advanced.clientId));
           res.json(formatInvoice(advanced, clientRowAdv?.name));
           return;
         }
+      }
+
+      // Fatura sem recorrência e estava vencida → muda para "Em Dia" ao pagar juros
+      if (existingInvoice.status === "overdue") {
+        await db.update(invoicesTable)
+          .set({ status: "current" })
+          .where(and(eq(invoicesTable.id, params.data.id), eq(invoicesTable.companyId, req.companyId)));
       }
     }
 
@@ -324,6 +349,27 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
           category: "cobranças",
           date: new Date(),
         });
+      }
+
+      // Notificar cliente via WhatsApp
+      const clientPhone = clientRow?.whatsappJid ?? clientRow?.phone;
+      if (clientPhone) {
+        try {
+          const [company] = await db.select().from(companiesTable).where(eq(companiesTable.id, req.companyId)).limit(1);
+          const waInstance = company?.whatsappInstance ?? process.env["WHATSAPP_INSTANCE"];
+          const waApiUrl  = process.env["EVOLUTION_SERVER_URL"];
+          const waApiKey  = process.env["EVOLUTION_API_KEY"];
+          const waAdmin   = company?.whatsappPhone ?? process.env["WHATSAPP_ADMIN_PHONE"] ?? "";
+          if (waInstance && waApiUrl && waApiKey && company?.whatsappStatus === "connected") {
+            const dueStr = invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString("pt-BR") : "";
+            const valStr = `R$ ${principal.toFixed(2).replace(".", ",")}`;
+            const msg = `✅ *Pagamento confirmado!*\n\nOlá, *${clientName}*!\n\nSeu pagamento foi registrado com sucesso.\n\n📋 Contrato: *#${invoice.id}*${dueStr ? `\n📅 Vencimento: ${dueStr}` : ""}\n💸 Valor: *${valStr}*\n\nObrigado! 🙏`;
+            await sendWA({ apiUrl: waApiUrl, apiKey: waApiKey, instance: waInstance, adminPhone: waAdmin, companyId: req.companyId }, clientPhone, msg);
+            logger.info(`[WA] Notificação de pagamento enviada para ${clientPhone} (invoice #${invoice.id})`);
+          }
+        } catch (e: any) {
+          logger.warn(`[WA] Falha ao notificar pagamento via WA: ${e.message}`);
+        }
       }
     }
 

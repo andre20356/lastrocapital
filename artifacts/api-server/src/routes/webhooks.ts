@@ -1,40 +1,19 @@
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { db, subscriptionsTable } from "@workspace/db";
-import crypto from "node:crypto";
 
 const router = Router();
 
-function verifySignature(req: Request): boolean {
-  const secret = process.env.ABACATEPAY_WEBHOOK_SECRET;
-  if (!secret) {
-    console.warn("[webhook] ABACATEPAY_WEBHOOK_SECRET não configurado — rejeitando requisição");
-    return false;
-  }
-
-  const signature = (req.headers["x-abacatepay-signature"] as string) ?? "";
-  const payload = JSON.stringify(req.body);
-  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-
-  try {
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-  } catch {
-    return false;
-  }
-}
-
+// AbacatePay v2 envia apenas: billing.paid | payout.done | payout.failed
+// Não há token/assinatura no request — segurança via URL privada
 router.post("/webhooks/abacatepay", async (req, res): Promise<void> => {
-  if (!verifySignature(req)) {
-    res.status(401).json({ error: "Invalid signature" });
-    return;
-  }
-
   const { event, data } = req.body as {
     event?: string;
+    devMode?: boolean;
     data?: {
-      pixQrCode?: { id?: string };
-      billing?: { id?: string; externalId?: string; expiresAt?: string };
-      subscription?: { id?: string; expiresAt?: string; nextBillingAt?: string };
+      payment?: { amount: number; fee: number; method: string };
+      billing?: { id: string; externalId: string; status: string; amount: number; url: string };
+      pixQrCode?: { id: string; status: string; amount: number; kind: string };
     };
   };
 
@@ -43,79 +22,43 @@ router.post("/webhooks/abacatepay", async (req, res): Promise<void> => {
     return;
   }
 
-  const externalId =
-    data?.pixQrCode?.id ??
-    data?.billing?.id ??
-    data?.subscription?.id ??
-    null;
+  req.log.info({ event }, "[AbacatePay] webhook recebido");
 
-  if (!externalId) {
-    req.log.warn({ event }, "AbacatePay webhook: no id in payload, ignoring");
-    res.status(200).json({ received: true, note: "no subscription id" });
+  if (event !== "billing.paid") {
+    res.status(200).json({ received: true, note: `unhandled event: ${event}` });
     return;
   }
 
-  const [existing] = await db
+  // O billing ID é o externalId que salvamos ao criar o checkout
+  const billingId = data?.billing?.id ?? data?.pixQrCode?.id ?? null;
+
+  if (!billingId) {
+    req.log.warn({ data }, "[AbacatePay] billing.paid sem billing.id");
+    res.status(200).json({ received: true, note: "no billing id" });
+    return;
+  }
+
+  const [subscription] = await db
     .select()
     .from(subscriptionsTable)
-    .where(eq(subscriptionsTable.externalId, externalId))
+    .where(eq(subscriptionsTable.externalId, billingId))
     .limit(1);
 
-  if (!existing) {
-    req.log.warn({ event, externalId }, "AbacatePay webhook: subscription not found");
+  if (!subscription) {
+    req.log.warn({ billingId }, "[AbacatePay] assinatura não encontrada para billing id");
     res.status(200).json({ received: true, note: "subscription not found" });
     return;
   }
 
-  let newStatus: string | null = null;
-  let expiresAt: Date | null = null;
+  // Pagamento único — ativa por 31 dias
+  const expiresAt = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
 
-  switch (event) {
-    case "subscription.completed":
-    case "subscription.renewed":
-    case "billing.paid":
-    case "subscription.paid":
-    case "subscription.active": {
-      newStatus = "active";
-      const rawExpiry =
-        data?.subscription?.nextBillingAt ??
-        data?.subscription?.expiresAt ??
-        data?.billing?.expiresAt;
-      expiresAt = rawExpiry
-        ? new Date(rawExpiry)
-        : new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
-      break;
-    }
-    case "subscription.payment_failed":
-    case "payment.failed":
-    case "billing.expired": {
-      newStatus = "past_due";
-      break;
-    }
-    case "subscription.cancelled":
-    case "subscription.canceled":
-    case "billing.refunded": {
-      newStatus = "canceled";
-      break;
-    }
-    default:
-      req.log.info({ event }, "AbacatePay webhook: unhandled event, ignoring");
-      res.status(200).json({ received: true, note: `unhandled event: ${event}` });
-      return;
-  }
+  await db
+    .update(subscriptionsTable)
+    .set({ status: "active", expiresAt, updatedAt: new Date() })
+    .where(eq(subscriptionsTable.externalId, billingId));
 
-  if (newStatus) {
-    await db
-      .update(subscriptionsTable)
-      .set({
-        status: newStatus,
-        ...(expiresAt ? { expiresAt } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptionsTable.externalId, externalId));
-  }
-
-  req.log.info({ event, externalId, newStatus }, "AbacatePay webhook processed");
+  req.log.info({ billingId, plan: subscription.plan, expiresAt }, "[AbacatePay] assinatura ativada");
   res.status(200).json({ received: true });
 });
 

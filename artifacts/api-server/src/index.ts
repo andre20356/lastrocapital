@@ -2,7 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { checkDueDateNotifications } from "./services/telegramNotifier";
 import { startTelegramCommandPolling } from "./services/telegramCommands";
-import { initWhatsAppInstance } from "./services/whatsappCommands";
+import { initWhatsAppInstance, loadPendingPayments } from "./services/whatsappCommands";
 
 const rawPort = process.env["PORT"];
 
@@ -59,6 +59,7 @@ app.listen(port, (err) => {
   const waWebhook = process.env["EVOLUTION_WEBHOOK_URL"] ?? `http://api:8080/api/webhook/whatsapp`;
   if (waUrl && waKey && waInst && waAdmin) {
     const companyIdRaw = process.env["WHATSAPP_COMPANY_ID"];
+    loadPendingPayments().catch(() => {});
     initWhatsAppInstance(
       { apiUrl: waUrl, apiKey: waKey, instance: waInst, adminPhone: waAdmin, companyId: companyIdRaw ? parseInt(companyIdRaw, 10) : undefined },
       waWebhook,

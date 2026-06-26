@@ -266,6 +266,122 @@ connectivityRouter.get("/connectivity/whatsapp/status", requireAuth, async (req:
   }
 });
 
+// POST /connectivity/whatsapp/pairing-code — recria instância com número e retorna código de 8 dígitos
+connectivityRouter.post("/connectivity/whatsapp/pairing-code", requireAuth, async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const [company] = await db
+      .select()
+      .from(companiesTable)
+      .where(eq(companiesTable.clerkUserId, req.userId!))
+      .limit(1);
+
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+
+    const { phoneNumber } = req.body as { phoneNumber?: string };
+    if (!phoneNumber) {
+      res.status(400).json({ error: "Número obrigatório" });
+      return;
+    }
+
+    const bare = phoneNumber.replace(/\D/g, "");
+    const instanceName = `lc_${company.id}`;
+    const apiUrl = EVOLUTION_SERVER_URL();
+    const apiKey = EVOLUTION_API_KEY();
+    const webhookUrl = EVOLUTION_WEBHOOK_URL();
+
+    // Remove instância existente para garantir código fresco
+    await fetch(`${apiUrl}/instance/logout/${instanceName}`, {
+      method: "DELETE", headers: { apikey: apiKey },
+    }).catch(() => {});
+    await new Promise(r => setTimeout(r, 800));
+    await fetch(`${apiUrl}/instance/delete/${instanceName}`, {
+      method: "DELETE", headers: { apikey: apiKey },
+    }).catch(() => {});
+    await new Promise(r => setTimeout(r, 800));
+
+    // Recria com número — Evolution v2.1 retorna pairingCode ao criar com number
+    const createRes = await fetch(`${apiUrl}/instance/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: apiKey },
+      body: JSON.stringify({
+        instanceName,
+        qrcode: true,
+        integration: "WHATSAPP-BAILEYS",
+        number: bare,
+      }),
+    });
+    const data = await createRes.json() as any;
+    const code: string | null = data?.qrcode?.pairingCode ?? null;
+
+    if (!code) {
+      logger.warn({ data }, "[Connectivity] Pairing code não retornado pela Evolution");
+      res.status(502).json({ error: "Não foi possível gerar o código. Verifique o número e tente novamente." });
+      return;
+    }
+
+    // Registra webhook na nova instância
+    await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: apiKey },
+      body: JSON.stringify({
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          webhook_by_events: false,
+          webhook_base64: false,
+          events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+        },
+      }),
+    }).catch(() => {});
+
+    await db.update(companiesTable)
+      .set({ whatsappInstance: instanceName, whatsappStatus: "connecting" })
+      .where(eq(companiesTable.id, company.id));
+
+    logger.info(`[Connectivity] Pairing code gerado para ${instanceName}: ${code}`);
+    res.json({ code });
+  } catch (e: any) {
+    logger.error({ err: e }, "[Connectivity] POST /connectivity/whatsapp/pairing-code");
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// GET /connectivity/whatsapp/pairing-code — busca código atual sem recriar instância (para auto-refresh)
+connectivityRouter.get("/connectivity/whatsapp/pairing-code", requireAuth, async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const [company] = await db
+      .select()
+      .from(companiesTable)
+      .where(eq(companiesTable.clerkUserId, req.userId!))
+      .limit(1);
+
+    if (!company?.whatsappInstance) {
+      res.status(404).json({ error: "Nenhuma instância configurada" });
+      return;
+    }
+
+    const r = await fetch(
+      `${EVOLUTION_SERVER_URL()}/instance/connect/${company.whatsappInstance}`,
+      { headers: { apikey: EVOLUTION_API_KEY() } },
+    );
+    const data = await r.json() as any;
+    const code: string | null = data?.pairingCode ?? null;
+
+    if (!code) {
+      res.status(404).json({ error: "Nenhum código disponível" });
+      return;
+    }
+
+    res.json({ code });
+  } catch (e: any) {
+    logger.error({ err: e }, "[Connectivity] GET /connectivity/whatsapp/pairing-code");
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 // DELETE /connectivity/whatsapp
 connectivityRouter.delete("/connectivity/whatsapp", requireAuth, async (req: AuthenticatedRequest, res): Promise<void> => {
   try {

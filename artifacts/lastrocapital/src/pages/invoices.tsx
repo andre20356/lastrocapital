@@ -87,14 +87,15 @@ function parseBRL(value: string): number {
   return parseFloat(cleaned) || 0;
 }
 
-function calcBreakdown(amount: string, interestRate: string, lateFee: string, daysLate: string): Breakdown | null {
+function calcBreakdown(amount: string, interestRate: string, lateFee: string, daysLate: string, recurrence?: string): Breakdown | null {
   const principal = parseBRL(amount);
   if (!principal || isNaN(principal)) return null;
   const rate = parseFloat(interestRate) || 0;
   const feePerDay = parseBRL(lateFee);
   const days = parseInt(daysLate) || 0;
-  const monthsLate = days > 0 ? Math.max(1, Math.floor(days / 30)) : 1;
-  const interestAmount = ((principal * rate) / 100) * monthsLate;
+  const divisor = PERIOD_DAYS[recurrence ?? "monthly"] ?? 30;
+  const periods = days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
+  const interestAmount = ((principal * rate) / 100) * periods;
   const lateFeeTotal = feePerDay * days;
   return { principal, interestAmount, lateFeeTotal, total: principal + interestAmount + lateFeeTotal };
 }
@@ -167,7 +168,7 @@ export default function Invoices() {
   const watchedDays = useWatch({ control: form.control, name: "daysLate" });
   const watchedRecurrence = useWatch({ control: form.control, name: "recurrence" });
 
-  const breakdown = calcBreakdown(watchedAmount, watchedInterest, watchedLateFee, watchedDays);
+  const breakdown = calcBreakdown(watchedAmount, watchedInterest, watchedLateFee, watchedDays, watchedRecurrence);
   const hasEncargos = breakdown && (breakdown.interestAmount > 0 || breakdown.lateFeeTotal > 0);
 
   const loanCalc: EmprestimoSemanal | null = (() => {
@@ -731,8 +732,9 @@ export default function Invoices() {
                     const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
                     const isOverdueWithFees = isOverdue && hasCharges;
                     const daysLateCalc = inv.daysLate ?? 0;
-                    const monthsLateCalc = daysLateCalc > 0 ? Math.max(1, Math.floor(daysLateCalc / 30)) : 1;
-                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * monthsLateCalc : 0;
+                    const periodDivisorCalc = PERIOD_DAYS[inv.recurrence ?? "monthly"] ?? 30;
+                    const monthsLateCalc = daysLateCalc > 0 ? Math.max(1, Math.floor(daysLateCalc / periodDivisorCalc)) : 0;
+                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * (monthsLateCalc || 1) : 0;
                     const lateFeeTotal = (inv.lateFee ?? 0) * daysLateCalc;
                     const alreadyPaidInterest = inv.interestPaid === true;
                     const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
@@ -773,7 +775,7 @@ export default function Invoices() {
                                 <span className="font-bold text-destructive tabular-nums">{formatCurrency(inv.totalDue)}</span>
                                 <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
                                   {(inv.interestRate ?? 0) > 0 && (
-                                    <div>Juros {inv.interestRate}%/mês × {monthsLateCalc} {monthsLateCalc > 1 ? "meses" : "mês"} = {formatCurrency(interestAmt)}</div>
+                                    <div>Juros {inv.interestRate}%/{inv.recurrence === "daily" ? "dia" : inv.recurrence === "weekly" ? "sem." : inv.recurrence === "biweekly" ? "qzn." : "mês"} × {monthsLateCalc} {inv.recurrence === "daily" ? (monthsLateCalc > 1 ? "dias" : "dia") : inv.recurrence === "weekly" ? (monthsLateCalc > 1 ? "sems." : "sem.") : inv.recurrence === "biweekly" ? (monthsLateCalc > 1 ? "qzns." : "qzn.") : (monthsLateCalc > 1 ? "meses" : "mês")} = {formatCurrency(interestAmt)}</div>
                                   )}
                                   {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
                                     <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
@@ -786,7 +788,7 @@ export default function Invoices() {
                               <span className="text-muted-foreground font-medium tabular-nums">{formatCurrency(inv.amount)}</span>
                               {hasInterest && !isPaid && (
                                 <div className="text-xs text-amber-500 mt-0.5">
-                                  Juros {inv.interestRate}%/mês = {formatCurrency(interestAmt)}
+                                  Juros {inv.interestRate}%/{inv.recurrence === "daily" ? "dia" : inv.recurrence === "weekly" ? "sem." : inv.recurrence === "biweekly" ? "qzn." : "mês"} = {formatCurrency(interestAmt)}
                                 </div>
                               )}
                             </div>

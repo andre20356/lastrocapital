@@ -78,6 +78,7 @@ export async function createCheckout(params: {
   planKey: PlanKey;
   returnUrl: string;
   completionUrl: string;
+  companyId?: string;
 }): Promise<AbacateCheckout> {
   const plan = PLANOS[params.planKey];
 
@@ -89,6 +90,7 @@ export async function createCheckout(params: {
       customerId: params.customer.id,
       returnUrl: params.returnUrl,
       completionUrl: params.completionUrl,
+      metadata: { companyId: params.companyId, planKey: params.planKey },
     }),
   });
 

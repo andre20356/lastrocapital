@@ -8,6 +8,16 @@ const router = Router();
 
 const VALID_PAID_PLANS = Object.keys(PLANOS) as PlanKey[];
 const TRIAL_DURATION_DAYS = 15;
+const ADMIN_USER_IDS = (process.env.ADMIN_CLERK_USER_IDS ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+const OWNER_SUBSCRIPTION = {
+  plan: "enterprise",
+  status: "active",
+  provider: "none",
+  expiresAt: null,
+  checkoutUrl: null,
+} as const;
 
 router.get(
   "/subscriptions/me",
@@ -15,6 +25,12 @@ router.get(
   async (req: AuthenticatedRequest, res): Promise<void> => {
     if (!req.companyId) {
       res.status(404).json({ error: "Company not found" });
+      return;
+    }
+
+    // Dono da plataforma — sempre ativo, nunca cobra
+    if (req.userId && ADMIN_USER_IDS.includes(req.userId)) {
+      res.json(OWNER_SUBSCRIPTION);
       return;
     }
 
@@ -86,6 +102,12 @@ router.post(
       return;
     }
 
+    // Dono da plataforma — nunca cobra
+    if (ADMIN_USER_IDS.includes(req.userId)) {
+      res.status(409).json({ error: "Já existe uma assinatura para esta empresa", code: "SUBSCRIPTION_EXISTS" });
+      return;
+    }
+
     const { plan, phone, cnpj } = req.body as { plan?: string; phone?: string; cnpj?: string };
 
     if (!plan || !VALID_PAID_PLANS.includes(plan as PlanKey)) {
@@ -138,6 +160,7 @@ router.post(
       planKey,
       returnUrl,
       completionUrl,
+      companyId: req.companyId,
     });
 
     const now = new Date();

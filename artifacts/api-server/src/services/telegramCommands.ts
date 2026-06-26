@@ -1,7 +1,7 @@
 import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTable } from "@workspace/db";
 import { eq, and, ilike, ne, or } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { pendingWaPayments, sendWA, type WaConfig } from "./whatsappCommands";
+import { removePendingPayment, sendWA, type WaConfig } from "./whatsappCommands";
 
 // ── Conversa para /cobranca ───────────────────────────────────────────────────
 
@@ -60,6 +60,22 @@ const conversations = new Map<number, ConvState>();
 
 function parseBRL(text: string): number {
   return parseFloat(text.trim().replace(/[R$\s.]/g, "").replace(",", ".")) || 0;
+}
+
+const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+function periodsLate(days: number, recurrence: string | null | undefined): number {
+  const divisor = PERIOD_DAYS[recurrence ?? "monthly"] ?? 30;
+  return days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
+}
+function periodLabel(recurrence: string | null | undefined, count: number): string {
+  const labels: Record<string, [string, string]> = {
+    daily:    ["dia",      "dias"],
+    weekly:   ["semana",   "semanas"],
+    biweekly: ["quinzena", "quinzenas"],
+    monthly:  ["mês",      "meses"],
+  };
+  const [s, p] = labels[recurrence ?? "monthly"] ?? ["mês", "meses"];
+  return count === 1 ? s : p;
 }
 
 function parseDateBR(text: string): string | null {
@@ -497,8 +513,9 @@ async function handleConversationStep(
       const principal = parseFloat(inv.amount ?? "0") || 0;
       const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
       const rate      = parseFloat(inv.interestRate ?? "0") || 0;
+      const monthsLateTg = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
       const multa     = feePerDay * daysLate;
-      const juros     = (principal * rate) / 100;
+      const juros     = (principal * rate) / 100 * (monthsLateTg || 1);
       const companyId = state.qt_clientCompanyId!;
       const clientName = state.qt_clientName ?? "—";
 
@@ -521,6 +538,25 @@ async function handleConversationStep(
           (juros > 0 ? `📈 Juros: ${fmtBRL(juros)}\n` : "") +
           `💸 <b>Total recebido: ${fmtBRL(total)}</b>\n` +
           `📋 Status: ✅ Pago`);
+        // Notificar cliente via WhatsApp
+        try {
+          const [clientRow] = await db.select({ phone: clientsTable.phone, whatsappJid: clientsTable.whatsappJid })
+            .from(clientsTable).where(eq(clientsTable.id, state.qt_clientId!)).limit(1);
+          const clientPhone = clientRow?.whatsappJid ?? clientRow?.phone;
+          if (clientPhone) {
+            const [comp] = await db.select({ whatsappInstance: companiesTable.whatsappInstance, whatsappPhone: companiesTable.whatsappPhone, whatsappStatus: companiesTable.whatsappStatus })
+              .from(companiesTable).where(eq(companiesTable.id, companyId)).limit(1);
+            const baseCfg = buildWaConfig();
+            const waCfg = baseCfg && comp?.whatsappStatus === "connected"
+              ? { ...baseCfg, instance: comp.whatsappInstance ?? baseCfg.instance, companyId }
+              : null;
+            if (waCfg) {
+              const dueFmt = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z").toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "";
+              await sendWA(waCfg, clientPhone,
+                `✅ *Pagamento confirmado!*\n\nOlá, *${clientName}*!\n\nSeu pagamento foi registrado com sucesso.\n\n📋 Contrato: *#${inv.id}*${dueFmt ? `\n📅 Vencimento: ${dueFmt}` : ""}\n💸 Valor: *${fmtBRL(total)}*\n\nObrigado! 🙏`);
+            }
+          }
+        } catch {}
       } else {
         const taxas = multa + juros;
         if (taxas <= 0) {
@@ -529,13 +565,55 @@ async function handleConversationStep(
             `ℹ️ <b>${clientName}</b> não possui juros ou multa acumulados (${daysLate}d de atraso sem taxa configurada).\n\nUse a opção <b>1</b> para quitação total.`);
           return;
         }
-        await db.update(invoicesTable).set({ interestPaid: true }).where(eq(invoicesTable.id, inv.id));
+        // Fecha dívida aberta
+        await db.update(debtsTable).set({ status: "closed" })
+          .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+
+        // Avança recorrência se houver; senão apenas marca interestPaid
+        let newDueDateFmt = "";
+        let newStatusLine = "📋 Cobrança permanece em aberto (principal não quitado)";
+        const recurrence = inv.recurrence;
+        const currentDueDate = inv.dueDate;
+        if (recurrence && recurrence !== "none" && currentDueDate) {
+          const base = new Date(currentDueDate + "T12:00:00Z");
+          if (recurrence === "monthly")   base.setUTCMonth(base.getUTCMonth() + 1);
+          else if (recurrence === "weekly")   base.setUTCDate(base.getUTCDate() + 7);
+          else if (recurrence === "biweekly") base.setUTCDate(base.getUTCDate() + 14);
+          else if (recurrence === "daily")    base.setUTCDate(base.getUTCDate() + 1);
+          const newDueDate = base.toISOString().split("T")[0];
+          const todayStr   = new Date().toISOString().split("T")[0];
+          const newStatus  = newDueDate > todayStr ? "current" : "overdue";
+          await db.update(invoicesTable)
+            .set({ dueDate: newDueDate, status: newStatus, interestPaid: false })
+            .where(eq(invoicesTable.id, inv.id));
+          if (newStatus === "overdue") {
+            const ex = await db.select().from(debtsTable)
+              .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+            if (ex.length === 0) {
+              await db.insert(debtsTable).values({
+                companyId, clientId: state.qt_clientId!, invoiceId: inv.id, status: "open", daysOverdue: 0,
+              });
+            }
+          }
+          newDueDateFmt = new Date(newDueDate + "T00:00:00Z").toLocaleDateString("pt-BR", { timeZone: "UTC" });
+          newStatusLine = newStatus === "current"
+            ? `📋 Status: <b>Em Dia ✅</b>\n📅 Próx. vencimento: <b>${newDueDateFmt}</b>`
+            : `📋 Status: <b>Vencido ⚠️</b>\n📅 Nova data: <b>${newDueDateFmt}</b>`;
+        } else {
+          // Sem recorrência: marca juros pagos e muda vencido → em dia
+          const noRecStatusTg = inv.status === "overdue" ? "current" : inv.status;
+          await db.update(invoicesTable)
+            .set({ interestPaid: true, status: noRecStatusTg })
+            .where(eq(invoicesTable.id, inv.id));
+          newStatusLine = `📋 Status: <b>Em Dia ✅</b>`;
+        }
+
         await db.insert(cashFlowTable).values({
           companyId,
           type:        "income",
           amount:      String(taxas.toFixed(2)),
           description: `Pagamento juros/multa — ${clientName}`,
-          category:    "recebimento",
+          category:    "juros",
         });
         conversations.delete(chatId);
         await sendTelegram(token, chatId,
@@ -544,7 +622,7 @@ async function handleConversationStep(
           (multa > 0 ? `⚠️ Multa paga: ${fmtBRL(multa)}\n` : "") +
           (juros > 0 ? `📈 Juros pagos: ${fmtBRL(juros)}\n` : "") +
           `💸 <b>Total recebido: ${fmtBRL(taxas)}</b>\n` +
-          `📋 Cobrança permanece em aberto (principal não quitado)`);
+          newStatusLine);
       }
       return;
     }
@@ -581,11 +659,10 @@ function buildInvoiceDetail(
   const principal  = parseFloat(inv.amount ?? "0") || 0;
   const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
   const rate       = parseFloat(inv.interestRate ?? "0") || 0;
-  const monthsLate = (inv.status === "overdue" && daysLate > 0)
-    ? Math.max(1, Math.floor(daysLate / 30)) : 0;
+  const monthsLate = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
   const multa      = feePerDay * daysLate;
   const jurosMes   = (principal * rate) / 100;
-  const jurosTotal = jurosMes * (monthsLate || 1);
+  const jurosTotal = jurosMes * monthsLate;
   const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
   const dueFmt     = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
   const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
@@ -604,19 +681,20 @@ function buildInvoiceDetail(
   if (inv.recurrence) msg += `\n🔄 Recorrência: ${inv.recurrence}`;
 
   if (inv.status === "overdue" && daysLate > 0) {
+    const periodDivisor = PERIOD_DAYS[inv.recurrence ?? "monthly"] ?? 30;
     msg += `\n\n⏳ <b>Dias em atraso:</b> ${daysLate} dias`;
-    msg += `\n📆 <b>Meses em atraso:</b> ${monthsLate} mês${monthsLate > 1 ? "es" : ""}`;
+    msg += `\n📆 <b>Períodos em atraso:</b> ${monthsLate} ${periodLabel(inv.recurrence, monthsLate)}`;
 
     if (monthsLate > 1 && (multa > 0 || jurosMes > 0)) {
-      msg += `\n\n📊 <b>Detalhamento por mês:</b>`;
+      msg += `\n\n📊 <b>Detalhamento por período:</b>`;
       for (let m = 1; m <= monthsLate; m++) {
-        const daysInMonth = m < monthsLate ? 30 : daysLate - 30 * (monthsLate - 1);
-        const multaMes = feePerDay * daysInMonth;
-        const subtotalMes = jurosMes + multaMes;
-        msg += `\n\n📅 <b>Mês ${m}:</b>`;
+        const daysInPeriod = m < monthsLate ? periodDivisor : daysLate - periodDivisor * (monthsLate - 1);
+        const multaPeriod = feePerDay * daysInPeriod;
+        const subtotalPeriod = jurosMes + multaPeriod;
+        msg += `\n\n📅 <b>Período ${m}:</b>`;
         if (jurosMes > 0) msg += `\n   💵 Juros: ${fmtBRL(jurosMes)}`;
-        if (multaMes > 0) msg += `\n   💸 Multa (${daysInMonth}d): ${fmtBRL(multaMes)}`;
-        msg += `\n   Subtotal: ${fmtBRL(subtotalMes)}`;
+        if (multaPeriod > 0) msg += `\n   💸 Multa (${daysInPeriod}d): ${fmtBRL(multaPeriod)}`;
+        msg += `\n   Subtotal: ${fmtBRL(subtotalPeriod)}`;
       }
       msg += "\n";
     } else {
@@ -707,6 +785,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
       dueDate:        invoicesTable.dueDate,
       lateFee:        invoicesTable.lateFee,
       interestRate:   invoicesTable.interestRate,
+      recurrence:     invoicesTable.recurrence,
       notes:          invoicesTable.notes,
       notesUpdatedAt: invoicesTable.notesUpdatedAt,
       companyName:    companiesTable.name,
@@ -740,7 +819,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
     const feePerDay  = parseFloat(row.lateFee ?? "0") || 0;
     const rate       = parseFloat(row.interestRate ?? "0") || 0;
     const multa      = feePerDay * daysLate;
-    const monthsLate = Math.max(1, Math.floor(daysLate / 30));
+    const monthsLate = periodsLate(daysLate, row.recurrence) || 1;
     const jurosMes   = (principal * rate) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total      = principal + jurosTotal + multa;
@@ -753,7 +832,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
     let entry =
       `👤 <b>${row.clientName ?? "—"}</b>${phone}${companyTag}${refTag}\n` +
       `📋 Contrato #${row.invoiceId}\n` +
-      `   📅 Venceu: ${dueDateFmt} | ⏳ <b>${daysLate} dias</b> (${monthsLate} mês${monthsLate > 1 ? "es" : ""})\n` +
+      `   📅 Venceu: ${dueDateFmt} | ⏳ <b>${daysLate} dias</b> (${monthsLate} ${periodLabel(row.recurrence, monthsLate)})\n` +
       `   💰 Principal: ${fmtBRL(principal)}`;
 
     if (jurosMes > 0) entry += `\n   📈 Juros (${rate}%): ${fmtBRL(jurosTotal)}`;
@@ -936,7 +1015,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       .reduce((sum, i) => {
         if (!i.dueDate) return sum + 1;
         const daysLate = Math.max(0, Math.floor((todayMs - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-        return sum + Math.max(1, Math.floor(daysLate / 30));
+        return sum + Math.max(1, periodsLate(daysLate, i.recurrence));
       }, 0);
     const overdueInvTag = overdueInvCount > 0
       ? ` | ⚠️ <b>${overdueInvCount} parcela${overdueInvCount > 1 ? "s" : ""} em atraso</b>` : "";
@@ -959,11 +1038,10 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       const principal  = parseFloat(inv.amount ?? "0") || 0;
       const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
       const rate       = parseFloat(inv.interestRate ?? "0") || 0;
-      const monthsLate = (inv.status === "overdue" && daysLate > 0)
-        ? Math.max(1, Math.floor(daysLate / 30)) : 0;
+      const monthsLate = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
       const multa      = feePerDay * daysLate;
       const jurosMes   = (principal * rate) / 100;
-      const jurosTotal = jurosMes * (monthsLate || 1);
+      const jurosTotal = jurosMes * monthsLate;
       const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
 
       const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
@@ -993,7 +1071,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       .reduce((sum, i) => {
         if (!i.dueDate) return sum + 1;
         const daysLate = Math.max(0, Math.floor((todayMs - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-        return sum + Math.max(1, Math.floor(daysLate / 30));
+        return sum + Math.max(1, periodsLate(daysLate, i.recurrence));
       }, 0);
     if (overdueCount > 0) {
       lines.push(`\n   ━━━━━━━━━━━━━━━━━━━━`);
@@ -1059,11 +1137,11 @@ function calcClientTotals(invoices: Array<typeof invoicesTable.$inferSelect>) {
     const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
     const daysLate = inv.status === "overdue" && due
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-    const monthsLate = daysLate > 0 ? Math.max(1, Math.floor(daysLate / 30)) : 0;
+    const monthsLate = periodsLate(daysLate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
     const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
-    const jurosTotal = jurosMes * (monthsLate || 1);
+    const jurosTotal = jurosMes * monthsLate;
     const extra = multa + (monthsLate > 0 ? jurosTotal : 0);
     totalAmount += principal + extra;
     jurosAmount += extra;
@@ -1089,20 +1167,20 @@ async function sendClientExtrato(token: string, chatId: number, clientId: number
     const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
     const daysLate = inv.status === "overdue" && due
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-    const monthsLate = daysLate > 0 ? Math.max(1, Math.floor(daysLate / 30)) : 0;
+    const monthsLate = periodsLate(daysLate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
     const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
-    const jurosTotal = jurosMes * (monthsLate || 1);
+    const jurosTotal = jurosMes * monthsLate;
     const total = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
     const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
     msg += `${STATUS_LABEL[inv.status] ?? inv.status} — venc. <b>${dueFmt}</b>\n`;
     msg += `💰 Principal: ${fmtBRL(principal)}`;
     if (daysLate > 0) {
-      msg += `\n📅 ${daysLate} dias em atraso (${monthsLate} mês${monthsLate > 1 ? "es" : ""})`;
+      msg += `\n📅 ${daysLate} dias em atraso (${monthsLate} ${periodLabel(inv.recurrence, monthsLate)})`;
       if (multa > 0) msg += `\n⚠️ Multa: ${fmtBRL(multa)}`;
       if (jurosMes > 0) msg += monthsLate > 1
-        ? `\n📈 Juros: ${fmtBRL(jurosMes)}/mês × ${monthsLate} = ${fmtBRL(jurosTotal)}`
+        ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${monthsLate} = ${fmtBRL(jurosTotal)}`
         : `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
     }
     msg += `\n💸 Total: <b>${fmtBRL(total)}</b>\n\n`;
@@ -1440,38 +1518,104 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
 
           } else if (cbData.startsWith("wapy_yes:") && cbChatId && cbMsgId) {
             const payId = cbData.slice("wapy_yes:".length);
-            const pending = pendingWaPayments.get(payId);
-            pendingWaPayments.delete(payId);
+            const pending = await removePendingPayment(payId);
 
             // Atualiza faturas no banco e lança no fluxo de caixa
             let paidCount = 0;
-            if (pending?.clientId) {
-              const pendingInvoices = await db.select().from(invoicesTable)
-                .where(and(eq(invoicesTable.clientId, pending.clientId), ne(invoicesTable.status, "paid")));
+            if (pending?.clientId && pending?.companyId) {
               const cfCompanyId = pending.companyId;
+              const valorPago = pending.totalAmount ?? 0;
 
-              // Marca todas as faturas como pagas e fecha débitos vencidos
-              for (const inv of pendingInvoices) {
-                await db.update(invoicesTable).set({ status: "paid" }).where(eq(invoicesTable.id, inv.id));
-                if (inv.status === "overdue") {
-                  await db.update(debtsTable).set({ status: "closed" })
-                    .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+              // Busca faturas em aberto do cliente para fechar apenas as que cabem no valor pago
+              const openInvoices = await db.select().from(invoicesTable)
+                .where(and(eq(invoicesTable.clientId, pending.clientId), ne(invoicesTable.status, "paid")))
+                .orderBy(invoicesTable.dueDate);
+
+              // Primeiro verifica se o valor pago corresponde a juros+multa de uma fatura recorrente
+              // (deve rodar ANTES do filtro de principal para evitar falso "Pago")
+              let jurosAdvanced = false;
+              if (valorPago > 0) {
+                const todayAdv = new Date(); todayAdv.setUTCHours(0, 0, 0, 0);
+                const todayStr = todayAdv.toISOString().split("T")[0];
+                for (const inv of openInvoices) {
+                  if (!inv.recurrence || inv.recurrence === "none") continue;
+                  const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
+                  const dl  = inv.status === "overdue" && due
+                    ? Math.max(0, Math.floor((todayAdv.getTime() - due.getTime()) / 86_400_000)) : 0;
+                  const p    = parseFloat(inv.amount ?? "0") || 0;
+                  const fee  = parseFloat(inv.lateFee ?? "0") || 0;
+                  const rate = parseFloat(inv.interestRate ?? "0") || 0;
+                  const pd   = periodsLate(dl, inv.recurrence);
+                  const encargos = fee * dl + (p * rate / 100) * (pd || 1);
+                  // Valor deve bater dentro de ±15% dos encargos E ser menor que 80% do principal
+                  // (evita confundir pagamento parcial de principal com juros)
+                  if (encargos > 0 && valorPago >= encargos * 0.85 && valorPago <= encargos * 1.15 && valorPago < p * 0.8) {
+                    // Pagamento de juros/multa detectado → avança recorrência
+                    await db.update(debtsTable).set({ status: "closed" })
+                      .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+                    const base = new Date((inv.dueDate ?? todayStr) + "T12:00:00Z");
+                    if (inv.recurrence === "monthly")        base.setUTCMonth(base.getUTCMonth() + 1);
+                    else if (inv.recurrence === "weekly")    base.setUTCDate(base.getUTCDate() + 7);
+                    else if (inv.recurrence === "biweekly")  base.setUTCDate(base.getUTCDate() + 14);
+                    else if (inv.recurrence === "daily")     base.setUTCDate(base.getUTCDate() + 1);
+                    const newDueDate = base.toISOString().split("T")[0];
+                    const newStatus  = newDueDate > todayStr ? "current" : "overdue";
+                    await db.update(invoicesTable)
+                      .set({ dueDate: newDueDate, status: newStatus, interestPaid: false })
+                      .where(eq(invoicesTable.id, inv.id));
+                    if (newStatus === "overdue") {
+                      const ex = await db.select().from(debtsTable)
+                        .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+                      if (ex.length === 0) {
+                        await db.insert(debtsTable).values({
+                          companyId: cfCompanyId, clientId: pending.clientId, invoiceId: inv.id, status: "open", daysOverdue: 0,
+                        });
+                      }
+                    }
+                    await db.insert(cashFlowTable).values({
+                      companyId: cfCompanyId, type: "income",
+                      amount: String(valorPago.toFixed(2)),
+                      description: `Juros/multa via WhatsApp — ${pending.clientName} (#${inv.id})`,
+                      category: "juros", date: new Date(),
+                    });
+                    jurosAdvanced = true;
+                    paidCount = 1;
+                    break;
+                  }
                 }
               }
 
-              // Lança UMA entrada no caixa com o valor exato que o cliente pagou (totalAmount do bot)
-              // Isso evita discrepâncias por juros recalculados — o valor mostrado ao cliente é o correto.
-              if (cfCompanyId && pendingInvoices.length > 0) {
-                const valorPago = pending.totalAmount ?? pendingInvoices.reduce((s, inv) => s + (parseFloat(inv.amount ?? "0") || 0), 0);
+              // Marca apenas as faturas cujo principal cabe no valor pago (tolerância 10%)
+              let toMark: typeof openInvoices = [];
+              if (!jurosAdvanced) {
+                let remaining = valorPago;
+                toMark = valorPago > 0
+                  ? openInvoices.filter(inv => { const v = parseFloat(inv.amount ?? "0") || 0; if (remaining >= v * 0.9) { remaining -= v; return true; } return false; })
+                  : openInvoices; // sem valor definido → marca todas
+
+                for (const inv of toMark) {
+                  await db.update(invoicesTable).set({ status: "paid", interestPaid: true }).where(eq(invoicesTable.id, inv.id));
+                  if (inv.status === "overdue") {
+                    await db.update(debtsTable).set({ status: "closed" })
+                      .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
+                  }
+                }
+              }
+
+              // Registra no cashflow quando admin confirma pagamento de principal
+              if (!jurosAdvanced && (valorPago > 0 || toMark.length > 0)) {
+                const valorFinal = valorPago > 0 ? valorPago
+                  : toMark.reduce((s, inv) => s + (parseFloat(inv.amount ?? "0") || 0), 0);
+                const descExtra = toMark.length === 0 ? " (fatura pendente — verificar manualmente)" : "";
                 await db.insert(cashFlowTable).values({
                   companyId: cfCompanyId, type: "income",
-                  amount: String(valorPago.toFixed(2)),
-                  description: `Quitação via WhatsApp — ${pending.clientName}`,
+                  amount: String(valorFinal.toFixed(2)),
+                  description: `Quitação via WhatsApp — ${pending.clientName}${descExtra}`,
                   category: "cobranças", date: new Date(),
                 });
               }
 
-              paidCount = pendingInvoices.length;
+              paidCount = toMark.length + (jurosAdvanced ? 1 : 0);
             }
 
             const waCfgYes = pending ? (pending.instance
@@ -1488,8 +1632,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
 
           } else if (cbData.startsWith("wapy_no:") && cbChatId && cbMsgId) {
             const payId = cbData.slice("wapy_no:".length);
-            const pending = pendingWaPayments.get(payId);
-            pendingWaPayments.delete(payId);
+            const pending = await removePendingPayment(payId);
             const waCfgNo = pending ? (pending.instance
               ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
               : buildWaConfig()) : null;
@@ -1716,7 +1859,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                 const overdueCount = invoices.filter(i => i.status === "overdue").reduce((sum, i) => {
                   if (!i.dueDate) return sum + 1;
                   const dl = Math.max(0, Math.floor((today.getTime() - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-                  return sum + Math.max(1, Math.floor(dl / 30));
+                  return sum + Math.max(1, periodsLate(dl, i.recurrence));
                 }, 0);
                 const overdueTag = overdueCount > 0 ? ` | ⚠️ <b>${overdueCount} parcela${overdueCount > 1 ? "s" : ""} em atraso</b>` : "";
                 const header = `👤 <b>${client.name}</b>${phone}${refTag}\n📋 <b>${invoices.length} contrato${invoices.length > 1 ? "s" : ""}</b>${overdueTag} — escolha um:\n\n`;
