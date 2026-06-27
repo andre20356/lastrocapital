@@ -57,6 +57,18 @@ services:
     expose:
       - "80"
 
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
+        VITE_API_URL: ${VITE_ADMIN_API_URL:-https://lastrocapital.online}
+    container_name: lastrocapital_admin
+    restart: unless-stopped
+    ports:
+      - "8282:80"
+
   nginx:
     image: nginx:alpine
     container_name: lastrocapital_nginx

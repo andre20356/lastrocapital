@@ -26,6 +26,11 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+// GET /api/admin/me — verifica se o usuário atual é admin
+adminRouter.get("/api/admin/me", requireAdmin, (_req, res): void => {
+  res.json({ isAdmin: true });
+});
+
 // GET /api/admin/stats — totais gerais
 adminRouter.get("/api/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
   try {
