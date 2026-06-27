@@ -27,12 +27,12 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
 }
 
 // GET /api/admin/me — verifica se o usuário atual é admin
-adminRouter.get("/api/admin/me", requireAdmin, (_req, res): void => {
+adminRouter.get("/admin/me", requireAdmin, (_req, res): void => {
   res.json({ isAdmin: true });
 });
 
 // GET /api/admin/stats — totais gerais
-adminRouter.get("/api/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
+adminRouter.get("/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
   try {
     const [{ total }] = await db.select({ total: count() }).from(companiesTable);
 
@@ -58,7 +58,7 @@ adminRouter.get("/api/admin/stats", requireAdmin, async (_req, res): Promise<voi
 });
 
 // GET /api/admin/subscribers — lista todos os assinantes com status
-adminRouter.get("/api/admin/subscribers", requireAdmin, async (_req, res): Promise<void> => {
+adminRouter.get("/admin/subscribers", requireAdmin, async (_req, res): Promise<void> => {
   try {
     const companies = await db
       .select()
@@ -117,7 +117,7 @@ adminRouter.get("/api/admin/subscribers", requireAdmin, async (_req, res): Promi
 });
 
 // DELETE /api/admin/subscribers/:id/whatsapp — desconecta WhatsApp de um assinante
-adminRouter.delete("/api/admin/subscribers/:id/whatsapp", requireAdmin, async (req, res): Promise<void> => {
+adminRouter.delete("/admin/subscribers/:id/whatsapp", requireAdmin, async (req, res): Promise<void> => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ error: "ID inválido" }); return; }
