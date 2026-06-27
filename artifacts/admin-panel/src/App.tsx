@@ -23,7 +23,11 @@ if (!CLERK_KEY) {
 
 export default function App() {
   return (
-    <ClerkProvider publishableKey={CLERK_KEY}>
+    <ClerkProvider
+      publishableKey={CLERK_KEY}
+      signInFallbackRedirectUrl="/painel/"
+      signUpFallbackRedirectUrl="/painel/"
+    >
       <QueryClientProvider client={queryClient}>
         <AuthGate />
       </QueryClientProvider>
