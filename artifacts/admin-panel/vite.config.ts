@@ -3,7 +3,10 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+const basePath = process.env.BASE_PATH ?? "/painel/";
+
 export default defineConfig({
+  base: basePath,
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

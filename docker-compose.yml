@@ -63,11 +63,11 @@ services:
       dockerfile: Dockerfile.admin
       args:
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
-        VITE_API_URL: ${VITE_ADMIN_API_URL:-https://lastrocapital.online}
+        VITE_API_URL: ""
     container_name: lastrocapital_admin
     restart: unless-stopped
-    ports:
-      - "8282:80"
+    expose:
+      - "80"
 
   nginx:
     image: nginx:alpine
