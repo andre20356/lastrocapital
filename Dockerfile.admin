@@ -4,6 +4,10 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY lib/api-spec/package.json ./lib/api-spec/
+COPY lib/api-zod/package.json ./lib/api-zod/
+COPY lib/api-client-react/package.json ./lib/api-client-react/
+COPY lib/db/package.json ./lib/db/
 COPY artifacts/admin-panel/package.json ./artifacts/admin-panel/
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm rebuild rollup 2>/dev/null || true
 
