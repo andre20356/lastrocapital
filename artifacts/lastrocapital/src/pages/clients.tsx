@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useListClients, getListClientsQueryKey, useCreateClient, useUpdateClient, useDeleteClient, useGetMyCompany, useListInvoices } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,11 +51,34 @@ function whatsappUrl(phone: string | null | undefined, name: string) {
 export default function Clients() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { getToken } = useAuth();
   const [statusFilter, setStatusFilter] = useState<"active" | "inactive" | "all">("all");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [sendingAlert, setSendingAlert] = useState<number | null>(null);
+
+  const sendOverdueAlert = useCallback(async (clientId: number, clientName: string) => {
+    setSendingAlert(clientId);
+    try {
+      const jwt = await getToken();
+      const res = await fetch(`/api/clients/${clientId}/send-overdue-alert`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Erro desconhecido" }));
+        toast({ title: "Erro ao enviar alerta", description: err.error, variant: "destructive" });
+        return;
+      }
+      toast({ title: "Alerta enviado!", description: `Mensagem de atraso enviada para ${clientName} via WhatsApp.` });
+    } catch {
+      toast({ title: "Erro ao enviar alerta", description: "Não foi possível enviar a mensagem.", variant: "destructive" });
+    } finally {
+      setSendingAlert(null);
+    }
+  }, [getToken, toast]);
 
   const { data: clients, isLoading } = useListClients(
     statusFilter !== "all" ? { status: statusFilter } : undefined,
@@ -386,7 +410,6 @@ export default function Clients() {
               <tbody>
                 {filtered.map((client) => {
                   const waUrl = whatsappUrl(client.phone, client.name);
-                  const alertUrl = alertWhatsappUrl(client.phone, client.name, client.id);
                   const reminderUrl = reminderWhatsappUrl(client.phone, client.name, client.id);
                   const hasOverdue = !!overdueByClient[client.id];
 
@@ -452,16 +475,20 @@ export default function Clients() {
                               <Bell className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          {alertUrl && (
+                          {hasOverdue && (
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              title="Alertar sobre atraso via WhatsApp"
-                              onClick={() => window.open(alertUrl, "_blank")}
+                              title="Enviar alerta de atraso via WhatsApp"
+                              onClick={() => sendOverdueAlert(client.id, client.name)}
+                              disabled={sendingAlert === client.id}
                               data-testid={`button-alert-client-${client.id}`}
                             >
-                              <AlertTriangle className="h-3.5 w-3.5" />
+                              {sendingAlert === client.id
+                                ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-destructive border-t-transparent" />
+                                : <AlertTriangle className="h-3.5 w-3.5" />
+                              }
                             </Button>
                           )}
                           {waUrl && (
