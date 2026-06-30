@@ -112,7 +112,7 @@ async function ensureJidMappings(): Promise<void> {
 setInterval(() => { reloadJidMappings().catch(() => {}); }, 30_000);
 
 // Persiste mapeamento @lid → telefone no banco e na memória. Retorna o JID real ou null.
-async function saveJidMapping(lidJid: string, inputPhone: string, companyId: number): Promise<string | null> {
+export async function saveJidMapping(lidJid: string, inputPhone: string, companyId: number): Promise<string | null> {
   const realJid = normalizePhoneForWA(inputPhone);
   const last8 = inputPhone.replace(/\D/g, "").slice(-8);
   try {
@@ -246,9 +246,15 @@ const NUM_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","
 
 // ── Evolution API HTTP ────────────────────────────────────────────────────────
 
-export async function sendWA(cfg: WaConfig, phone: string, text: string): Promise<void> {
-  // Evolution API aceita só dígitos ou @lid — remove sufixo @s.whatsapp.net se existir
-  const number = phone.endsWith("@s.whatsapp.net") ? phone.split("@")[0] : phone;
+export async function sendWA(cfg: WaConfig, phone: string, text: string): Promise<string | null> {
+  // @lid: Evolution API aceita o JID completo diretamente como número de destino
+  let number: string;
+  if (phone.endsWith("@lid")) {
+    number = phone;
+  } else {
+    const digits = phone.replace(/\D/g, "");
+    number = digits.startsWith("55") && digits.length >= 12 ? digits : `55${digits}`;
+  }
   try {
     const res = await fetch(`${cfg.apiUrl}/message/sendText/${cfg.instance}`, {
       method: "POST",
@@ -258,26 +264,33 @@ export async function sendWA(cfg: WaConfig, phone: string, text: string): Promis
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       logger.warn(`[WA] Falha ao enviar para ${number}: ${res.status} ${body}`);
+      return null;
     }
+    // Retorna o remoteJid resolvido pela Evolution — pode ser @lid se o contato usa multi-device
+    const data = await res.json().catch(() => null) as any;
+    return data?.key?.remoteJid ?? null;
   } catch (e: any) {
     logger.warn(`[WA] Erro HTTP ao enviar para ${number}: ${e.message}`);
+    return null;
   }
 }
 
-async function sendWAChunked(cfg: WaConfig, phone: string, text: string): Promise<void> {
+async function sendWAChunked(cfg: WaConfig, phone: string, text: string): Promise<string | null> {
   const MAX = 3800;
-  if (text.length <= MAX) { await sendWA(cfg, phone, text); return; }
+  if (text.length <= MAX) return sendWA(cfg, phone, text);
   const lines = text.split("\n");
   let chunk = "";
+  let lastJid: string | null = null;
   for (const line of lines) {
     if (chunk.length + line.length + 1 > MAX) {
-      await sendWA(cfg, phone, chunk.trimEnd());
+      lastJid = await sendWA(cfg, phone, chunk.trimEnd());
       chunk = line + "\n";
     } else {
       chunk += line + "\n";
     }
   }
-  if (chunk.trim()) await sendWA(cfg, phone, chunk.trimEnd());
+  if (chunk.trim()) lastJid = await sendWA(cfg, phone, chunk.trimEnd());
+  return lastJid;
 }
 
 // ── Normalizar telefone ───────────────────────────────────────────────────────

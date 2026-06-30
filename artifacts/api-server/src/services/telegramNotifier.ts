@@ -1,7 +1,7 @@
 import { db, invoicesTable, clientsTable, companiesTable } from "@workspace/db";
 import { eq, and, ne, isNotNull } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { sendWA, type WaConfig } from "./whatsappCommands";
+import { sendWA, saveJidMapping, type WaConfig } from "./whatsappCommands";
 
 // Notificação para o admin do SaaS (env vars)
 const ADMIN_TOKEN   = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -39,10 +39,13 @@ export async function checkDueDateNotifications(): Promise<void> {
   // Busca todas as empresas com telegram configurado
   const companies = await db
     .select({
-      id:               companiesTable.id,
-      name:             companiesTable.name,
-      telegramBotToken: companiesTable.telegramBotToken,
-      telegramChatId:   companiesTable.telegramChatId,
+      id:                companiesTable.id,
+      name:              companiesTable.name,
+      telegramBotToken:  companiesTable.telegramBotToken,
+      telegramChatId:    companiesTable.telegramChatId,
+      whatsappInstance:  companiesTable.whatsappInstance,
+      whatsappStatus:    companiesTable.whatsappStatus,
+      whatsappPhone:     companiesTable.whatsappPhone,
     })
     .from(companiesTable);
 
@@ -55,8 +58,10 @@ export async function checkDueDateNotifications(): Promise<void> {
         amount:              invoicesTable.amount,
         dueDate:             invoicesTable.dueDate,
         companyId:           invoicesTable.companyId,
+        clientId:            clientsTable.id,
         clientName:          clientsTable.name,
         clientPhone:         clientsTable.phone,
+        clientWhatsappJid:   clientsTable.whatsappJid,
         clientTelegramChatId: clientsTable.telegramChatId,
         companyName:         companiesTable.name,
         companyBotToken:     companiesTable.telegramBotToken,
@@ -139,18 +144,27 @@ export async function checkDueDateNotifications(): Promise<void> {
       logger.info(`[Telegram] Cliente "${r.clientName}" notificado diretamente (vence em ${label})`);
     }
 
-    // 4. Notifica clientes via WhatsApp (quem tem telefone cadastrado)
-    const waApiUrl   = process.env["EVOLUTION_SERVER_URL"];
-    const waApiKey   = process.env["EVOLUTION_API_KEY"];
-    const waInstance = process.env["WHATSAPP_INSTANCE"];
-    const waAdmin    = process.env["WHATSAPP_ADMIN_PHONE"];
-    const waCfg = waApiUrl && waApiKey && waInstance && waAdmin
-      ? { apiUrl: waApiUrl, apiKey: waApiKey, instance: waInstance, adminPhone: waAdmin,
-          companyId: process.env["WHATSAPP_COMPANY_ID"] ? parseInt(process.env["WHATSAPP_COMPANY_ID"], 10) : undefined }
-      : null;
-    if (waCfg) {
+    // 4. Notifica clientes via WhatsApp usando a instância de cada empresa
+    const waApiUrl = process.env["EVOLUTION_SERVER_URL"];
+    const waApiKey = process.env["EVOLUTION_API_KEY"];
+    if (waApiUrl && waApiKey) {
       const waClientRows = rows.filter((r) => r.clientPhone);
+
       for (const r of waClientRows) {
+        const company = companies.find((c) => c.id === r.companyId);
+        if (!company?.whatsappInstance || company.whatsappStatus !== "connected") {
+          logger.warn(`[WA] Empresa ${r.companyId} sem WhatsApp conectado — pulando cliente ${r.clientName}`);
+          continue;
+        }
+
+        const waCfg: WaConfig = {
+          apiUrl:     waApiUrl,
+          apiKey:     waApiKey,
+          instance:   company.whatsappInstance,
+          adminPhone: company.whatsappPhone ?? "",
+          companyId:  company.id,
+        };
+
         const valor  = r.amount ? `R$ ${parseFloat(r.amount).toFixed(2).replace(".", ",")}` : "—";
         const dueFmt = r.dueDate
           ? new Date(r.dueDate + "T00:00:00Z").toLocaleDateString("pt-BR", { timeZone: "UTC" })
@@ -162,25 +176,34 @@ export async function checkDueDateNotifications(): Promise<void> {
             ? `vence *amanhã* (${dueFmt})`
             : `vence em *${label}* (${dueFmt})`;
 
-        const alerteHojeWa = days === 0
+        const alerteHoje = days === 0
           ? `⚠️ *Atenção:* pagamentos realizados após o vencimento estão sujeitos a multa e juros de mora. Regularize hoje e evite encargos adicionais.\n\n`
           : "";
 
+        const nomeEmpresa = (company.name ?? "").toUpperCase();
+
         const clientMsg =
           `━━━━━━━━━━━━━━━━━━━\n` +
-          `  🏦 *LASTRO CAPITAL*\n` +
+          `  🏦 *${nomeEmpresa}*\n` +
           `━━━━━━━━━━━━━━━━━━━\n\n` +
           `${icon} Olá, *${r.clientName ?? "cliente"}*!\n\n` +
           `Seu pagamento de *${valor}* ${venceTexto}.\n\n` +
-          alerteHojeWa +
+          alerteHoje +
           `Responda *menu* para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
-          `Qualquer dúvida, entre em contato conosco. 😊`;
+          `Qualquer dúvida, entre em contato conosco. 😊\n\n` +
+          `*${company.name ?? ""}*`;
 
-        const clientPhone = r.clientPhone!.replace(/\D/g, "");
-        await sendWA(waCfg, clientPhone, clientMsg).catch((e: any) =>
-          logger.warn(`[WA] Falha ao notificar cliente ${r.clientName}: ${e.message}`),
-        );
-        logger.info(`[WA] Cliente "${r.clientName}" notificado via WhatsApp (vence em ${label})`);
+        const remoteJid = await sendWA(waCfg, r.clientPhone!, clientMsg).catch((e: any) => {
+          logger.warn(`[WA] Falha ao notificar cliente ${r.clientName}: ${e.message}`);
+          return null;
+        });
+        logger.info(`[WA] Cliente "${r.clientName}" notificado via WhatsApp — instância ${company.whatsappInstance} (vence em ${label})`);
+
+        // Captura mapeamento @lid na resposta da Evolution e persiste no banco
+        if (remoteJid?.endsWith("@lid") && r.clientId && remoteJid !== r.clientWhatsappJid) {
+          await saveJidMapping(remoteJid, r.clientPhone!, r.companyId!).catch(() => {});
+          logger.info(`[WA] @lid capturado via notificação: ${remoteJid} → ${r.clientName}`);
+        }
       }
     }
   }
