@@ -71,7 +71,7 @@ router.get("/invoices", requireAuth, async (req: AuthenticatedRequest, res): Pro
       .from(invoicesTable)
       .leftJoin(clientsTable, eq(invoicesTable.clientId, clientsTable.id))
       .where(and(...conditions))
-      .orderBy(invoicesTable.createdAt);
+      .orderBy(invoicesTable.dueDate);
 
     res.json(rows.map((r) => formatInvoice(r.invoice, r.clientName)));
   } catch (err) {
