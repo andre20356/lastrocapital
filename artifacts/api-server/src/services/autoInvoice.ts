@@ -1,5 +1,5 @@
 import { db, invoicesTable } from "@workspace/db";
-import { eq, and, isNotNull, ne } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, ne } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 // Soma 1 mês preservando o dia original sempre que o mês de destino permitir.
@@ -46,22 +46,28 @@ export async function generateRecurringInvoices(): Promise<void> {
 
   // Um contrato recorrente pode ter várias parcelas "overdue" em aberto ao mesmo tempo
   // (ex.: cliente inadimplente há meses). Usamos apenas a parcela mais recente de cada
-  // cliente/empresa como origem do backfill — caso contrário cada parcela já gerada por
-  // uma execução anterior vira uma nova origem na execução seguinte, multiplicando as
+  // contrato como origem do backfill — caso contrário cada parcela já gerada por uma
+  // execução anterior vira uma nova origem na execução seguinte, multiplicando as
   // parcelas geradas a cada dia.
-  const latestByClient = new Map<string, (typeof overdueInvoices)[number]>();
+  //
+  // Um mesmo cliente pode ter VÁRIOS contratos simultâneos e independentes (cada um
+  // identificado pela "nota" — ex. "Ref. Eduarda", "Ref. Kamilly"). Agrupar só por
+  // cliente faz a função tratar um contrato qualquer como se fosse "a" recorrência do
+  // cliente inteiro e gerar parcelas fantasmas de outro contrato. Por isso o agrupamento
+  // inclui a nota — cada contrato mantém sua própria cadeia de recorrência.
+  const latestByContract = new Map<string, (typeof overdueInvoices)[number]>();
   for (const inv of overdueInvoices) {
     if (!inv.dueDate) continue;
-    const key = `${inv.companyId}-${inv.clientId}`;
-    const current = latestByClient.get(key);
+    const key = `${inv.companyId}-${inv.clientId}-${inv.notes ?? ""}`;
+    const current = latestByContract.get(key);
     if (!current || !current.dueDate || inv.dueDate > current.dueDate) {
-      latestByClient.set(key, inv);
+      latestByContract.set(key, inv);
     }
   }
 
   let generated = 0;
 
-  for (const inv of latestByClient.values()) {
+  for (const inv of latestByContract.values()) {
     if (!inv.dueDate || !inv.recurrence) continue;
 
     let cursor = new Date(inv.dueDate + "T00:00:00Z");
@@ -71,6 +77,10 @@ export async function generateRecurringInvoices(): Promise<void> {
     while (nextDue <= today) {
       const nextDueStr = nextDue.toISOString().slice(0, 10);
 
+      const notesCondition = inv.notes
+        ? eq(invoicesTable.notes, inv.notes)
+        : isNull(invoicesTable.notes);
+
       const [existing] = await db
         .select({ id: invoicesTable.id })
         .from(invoicesTable)
@@ -79,6 +89,7 @@ export async function generateRecurringInvoices(): Promise<void> {
             eq(invoicesTable.clientId, inv.clientId),
             eq(invoicesTable.companyId, inv.companyId),
             eq(invoicesTable.dueDate, nextDueStr),
+            notesCondition,
           ),
         )
         .limit(1);
@@ -95,9 +106,10 @@ export async function generateRecurringInvoices(): Promise<void> {
           recurrence:   inv.recurrence,
           daysLate:     0,
           interestPaid: false,
+          notes:        inv.notes,
         });
         generated++;
-        logger.info(`[AutoInvoice] Parcela gerada: cliente ${inv.clientId}, venc. ${nextDueStr}`);
+        logger.info(`[AutoInvoice] Parcela gerada: cliente ${inv.clientId}, venc. ${nextDueStr}${inv.notes ? ` (${inv.notes})` : ""}`);
       }
 
       cursor  = nextDue;
