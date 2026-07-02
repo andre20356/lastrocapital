@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { checkDueDateNotifications } from "./services/telegramNotifier";
+import { generateRecurringInvoices } from "./services/autoInvoice";
 import { startTelegramCommandPolling } from "./services/telegramCommands";
 import { initWhatsAppInstance, loadPendingPayments } from "./services/whatsappCommands";
 
@@ -34,16 +35,16 @@ app.listen(port, (err) => {
     if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
     const delay = next.getTime() - now.getTime();
     setTimeout(() => {
-      checkDueDateNotifications().catch((e) =>
-        logger.error({ err: e }, "[Telegram] Erro no cron de vencimentos"),
-      );
-      setInterval(
-        () =>
-          checkDueDateNotifications().catch((e) =>
-            logger.error({ err: e }, "[Telegram] Erro no cron de vencimentos"),
-          ),
-        24 * 60 * 60 * 1000,
-      );
+      const runDaily = () => {
+        generateRecurringInvoices().catch((e) =>
+          logger.error({ err: e }, "[AutoInvoice] Erro na geração de parcelas"),
+        );
+        checkDueDateNotifications().catch((e) =>
+          logger.error({ err: e }, "[Telegram] Erro no cron de vencimentos"),
+        );
+      };
+      runDaily();
+      setInterval(runDaily, 24 * 60 * 60 * 1000);
     }, delay);
     logger.info(`[Telegram] Cron agendado — próxima execução em ${Math.round(delay / 60000)} min`);
   };

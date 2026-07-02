@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, clientsTable, invoicesTable, companiesTable } from "@workspace/db";
+import { calculateInvoiceBreakdown } from "../services/invoiceCalculator";
 import {
   CreateClientBody,
   UpdateClientBody,
@@ -197,26 +198,14 @@ router.post("/clients/:id/send-overdue-alert", requireAuth, async (req: Authenti
     return;
   }
 
-  const principal = overdue.reduce((s, inv) => s + parseFloat(inv.amount ?? "0"), 0);
-  const interest  = overdue.reduce((s, inv) => s + parseFloat(inv.amount ?? "0") * parseFloat(inv.interestRate ?? "0") / 100, 0);
-  const lateFees  = overdue.reduce((s, inv) => s + parseFloat(inv.lateFee ?? "0"), 0);
-  const total     = principal + interest + lateFees;
-
   const fmt = (v: number) =>
     v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  const msg =
-    `🔴 *Aviso de Atraso — Lastro Capital Gestão de Negócio*\n\n` +
-    `Olá, ${client.name}.\n\n` +
-    `Identificamos pendências em seu contrato. Seguem os detalhes:\n\n` +
-    `📌 Valor principal: ${fmt(principal)}\n` +
-    `📌 Juros em atraso: ${fmt(interest)}\n` +
-    `📌 Taxas de atraso: ${fmt(lateFees)}\n` +
-    `📌 *Total para quitação: ${fmt(total)}*\n\n` +
-    `Solicitamos contato imediato com nossa equipe para regularização do valor em aberto e evitar encargos adicionais.\n\n` +
-    `Após o pagamento, envie o comprovante para atualização do seu contrato.\n\n` +
-    `Agradecemos sua atenção.\n` +
-    `*Lastro Capital Gestão de Negócio*`;
+  const fmtDate = (d: string | null) => {
+    if (!d) return "—";
+    const [y, m, day] = d.split("-");
+    return `${day}/${m}/${y}`;
+  };
 
   // Busca instância WhatsApp da empresa
   const [company] = await db
@@ -228,6 +217,53 @@ router.post("/clients/:id/send-overdue-alert", requireAuth, async (req: Authenti
     res.status(400).json({ error: "WhatsApp da empresa não está conectado" });
     return;
   }
+
+  let grandTotal = 0;
+
+  const contractLines = overdue.map((inv, i) => {
+    // Sempre calcula os dias reais pela data de vencimento vs hoje
+    // Taxa de atraso só começa após 2 dias de carência
+    const GRACE_DAYS = 2;
+    const totalDays = (() => {
+      if (!inv.dueDate) return 0;
+      const due = new Date(inv.dueDate + "T00:00:00-03:00"); // fuso Brasil
+      return Math.max(0, Math.floor((Date.now() - due.getTime()) / 86_400_000));
+    })();
+    const realDays = Math.max(0, totalDays - GRACE_DAYS);
+
+    const breakdown = calculateInvoiceBreakdown({ ...inv, daysLate: realDays });
+    if (!breakdown) return null;
+
+    const { principal, interestAmount, lateFeeTotal, total } = breakdown;
+    const encargos = interestAmount + lateFeeTotal;
+    const days     = realDays;
+    grandTotal += total;
+
+    const feePerDay = parseFloat(inv.lateFee ?? "0");
+
+    return (
+      `📋 *Contrato ${i + 1}* — Venc. ${fmtDate(inv.dueDate)}\n` +
+      `   Principal: ${fmt(principal)}\n` +
+      `   Juros: ${fmt(interestAmount)}\n` +
+      `   Taxa de atraso: ${fmt(feePerDay)}/dia\n` +
+      `   Dias em atraso: ${totalDays} dia${totalDays !== 1 ? "s" : ""} (cobrança a partir do 3º dia)\n` +
+      `   Total encargos: ${fmt(encargos)}\n` +
+      `   Subtotal: *${fmt(total)}*`
+    );
+  }).filter(Boolean).join("\n\n");
+
+  const nomeEmpresa = company.name ?? "Nossa Empresa";
+
+  const msg =
+    `🔴 *Aviso de Atraso — ${nomeEmpresa}*\n\n` +
+    `Olá, ${client.name}.\n\n` +
+    `Identificamos as seguintes pendências em seu(s) contrato(s):\n\n` +
+    contractLines + "\n\n" +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `💰 *Total para quitação: ${fmt(grandTotal)}*\n\n` +
+    `Para efetuar o pagamento, digite *menu*.\n\n` +
+    `⚠️ *O envio do comprovante é obrigatório.* Sem ele, o sistema não identifica seu pagamento e taxas de atraso adicionais poderão ser geradas.\n\n` +
+    `*${nomeEmpresa}*`;
 
   const cfg = {
     apiUrl:     process.env.EVOLUTION_SERVER_URL ?? "http://evolution:8080",

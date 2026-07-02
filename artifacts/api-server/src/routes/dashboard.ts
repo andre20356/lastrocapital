@@ -99,7 +99,8 @@ router.get("/dashboard/summary", requireAuth, async (req: AuthenticatedRequest, 
     .where(
       and(
         eq(invoicesTable.companyId, companyId),
-        sql`DATE(${invoicesTable.createdAt}) = CURRENT_DATE`
+        sql`DATE(${invoicesTable.createdAt}) = CURRENT_DATE`,
+        sql`${invoicesTable.dueDate} >= CURRENT_DATE`
       )
     );
 

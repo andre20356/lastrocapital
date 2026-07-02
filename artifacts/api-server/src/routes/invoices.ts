@@ -270,7 +270,13 @@ router.patch("/invoices/:id", requireAuth, async (req: AuthenticatedRequest, res
       if (recurrence && recurrence !== "none" && currentDueDate) {
         const base = new Date(currentDueDate + "T12:00:00Z");
         if (recurrence === "monthly") {
+          // Preserva o dia original quando possível: setUTCMonth() sozinho estoura pro
+          // mês seguinte quando o dia não existe no mês de destino (ex.: 31/05 -> 01/07).
+          const day = base.getUTCDate();
+          base.setUTCDate(1);
           base.setUTCMonth(base.getUTCMonth() + 1);
+          const lastDayOfMonth = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+          base.setUTCDate(Math.min(day, lastDayOfMonth));
         } else if (recurrence === "weekly") {
           base.setUTCDate(base.getUTCDate() + 7);
         } else if (recurrence === "biweekly") {
