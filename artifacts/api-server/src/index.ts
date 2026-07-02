@@ -1,7 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { checkDueDateNotifications } from "./services/telegramNotifier";
-import { generateRecurringInvoices } from "./services/autoInvoice";
 import { startTelegramCommandPolling } from "./services/telegramCommands";
 import { initWhatsAppInstance, loadPendingPayments } from "./services/whatsappCommands";
 
@@ -35,10 +34,11 @@ app.listen(port, (err) => {
     if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
     const delay = next.getTime() - now.getTime();
     setTimeout(() => {
+      // AutoInvoice (generateRecurringInvoices) desativado em 2026-07-02: duplicava o
+      // principal de contratos recorrentes em vez de só acumular meses de atraso na
+      // mesma fatura (o cálculo de juros/multa já lida com múltiplos períodos via
+      // daysLate). Ver histórico do commit antes de reativar.
       const runDaily = () => {
-        generateRecurringInvoices().catch((e) =>
-          logger.error({ err: e }, "[AutoInvoice] Erro na geração de parcelas"),
-        );
         checkDueDateNotifications().catch((e) =>
           logger.error({ err: e }, "[Telegram] Erro no cron de vencimentos"),
         );
