@@ -243,6 +243,7 @@ router.post("/clients/:id/send-overdue-alert", requireAuth, async (req: Authenti
 
     return (
       `📋 *Contrato ${i + 1}* — Venc. ${fmtDate(inv.dueDate)}\n` +
+      (inv.notes ? `   Nota: ${inv.notes}\n` : "") +
       `   Principal: ${fmt(principal)}\n` +
       `   Juros: ${fmt(interestAmount)}\n` +
       `   Taxa de atraso: ${fmt(feePerDay)}/dia\n` +
