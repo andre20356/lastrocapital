@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt, notInArray, sql } from "drizzle-orm";
 import { db, clientsTable, invoicesTable, companiesTable } from "@workspace/db";
 import { calculateInvoiceBreakdown } from "./invoiceCalculator";
 import { sendWA } from "./whatsappCommands";
@@ -32,13 +32,18 @@ export async function montarEEnviarAlertaAtraso(
   if (!client) return { ok: false, motivo: "Cliente não encontrado" };
   if (!client.phone) return { ok: false, motivo: "Cliente sem telefone cadastrado" };
 
+  // Usa a data de vencimento real em vez do campo status: algumas faturas já
+  // vencidas nunca foram viradas manualmente pra "overdue" no painel (achado
+  // real: 9 faturas vencidas ainda marcadas "current"/"requested" em 2026-07-03)
+  // — sem isso, essas ficariam de fora do aviso e da cobrança diária.
   const overdue = await db
     .select()
     .from(invoicesTable)
     .where(and(
       eq(invoicesTable.companyId, companyId),
       eq(invoicesTable.clientId, clientId),
-      eq(invoicesTable.status, "overdue"),
+      lt(invoicesTable.dueDate, sql`CURRENT_DATE`),
+      notInArray(invoicesTable.status, ["paid", "requested"]),
     ));
 
   if (overdue.length === 0) return { ok: false, motivo: "Cliente não possui faturas em atraso" };
@@ -65,7 +70,11 @@ export async function montarEEnviarAlertaAtraso(
     })();
     const realDays = Math.max(0, totalDays - GRACE_DAYS);
 
-    const breakdown = calculateInvoiceBreakdown({ ...inv, daysLate: realDays });
+    // status: "overdue" força o cálculo de juros/multa mesmo quando a fatura
+    // ainda está marcada "current" no banco — já confirmamos pela data que
+    // está vencida de verdade, calculateInvoiceBreakdown só aplica encargos
+    // se o status literal for "overdue".
+    const breakdown = calculateInvoiceBreakdown({ ...inv, status: "overdue", daysLate: realDays });
     if (!breakdown) return null;
 
     const { principal, interestAmount, lateFeeTotal, total } = breakdown;
@@ -112,46 +121,32 @@ export async function montarEEnviarAlertaAtraso(
   return { ok: true, sentTo: client.phone, clientName: client.name };
 }
 
-// ── Cobrança diária automática (contratos vencidos há mais de X dias) ────────
-// Não repete pra quem venceu há pouco (esse caso já é coberto pelo lembrete
-// pré-vencimento em checkDueDateNotifications) — só entra em ação pra atraso
-// crônico, repetindo TODO DIA até o cliente quitar ou o contrato deixar de
-// aparecer como "overdue".
-
-const DIAS_MINIMO_ATRASO_CRONICO = 30;
+// ── Cobrança diária automática (todo cliente já vencido) ─────────────────────
+// Duas fases bem separadas: quem AINDA VAI vencer recebe o lembrete de
+// 7/3/1 dias (checkDueDateNotifications, telegramNotifier.ts); quem JÁ VENCEU
+// entra aqui — dispara todo dia, desde o 1º dia de atraso, até o contrato
+// deixar de estar vencido (pago/renegociado). Usa a data real de vencimento,
+// não o campo status (ver nota em montarEEnviarAlertaAtraso).
 
 export async function cobrarClientesAtrasoCronico(): Promise<void> {
   const companies = await db.select().from(companiesTable);
 
-  const hoje = new Date();
-  hoje.setUTCHours(0, 0, 0, 0);
-
   for (const company of companies) {
     if (!company.whatsappInstance || company.whatsappStatus !== "connected") continue;
 
-    const overdueDaCompany = await db
-      .select()
+    const vencidosDaCompany = await db
+      .select({ clientId: invoicesTable.clientId })
       .from(invoicesTable)
       .where(and(
         eq(invoicesTable.companyId, company.id),
-        eq(invoicesTable.status, "overdue"),
+        lt(invoicesTable.dueDate, sql`CURRENT_DATE`),
+        notInArray(invoicesTable.status, ["paid", "requested"]),
       ));
 
-    // Agrupa por cliente — o alerta já reúne todos os contratos overdue dele
-    // numa mensagem só; o gatilho é "tem PELO MENOS 1 contrato com 30+ dias".
-    const clientesElegiveis = new Set<number>();
-    for (const inv of overdueDaCompany) {
-      if (!inv.dueDate) continue;
-      const due = new Date(inv.dueDate + "T00:00:00-03:00");
-      const diasAtraso = Math.floor((hoje.getTime() - due.getTime()) / 86_400_000);
-      if (diasAtraso >= DIAS_MINIMO_ATRASO_CRONICO) {
-        clientesElegiveis.add(inv.clientId);
-      }
-    }
-
+    const clientesElegiveis = new Set(vencidosDaCompany.map((r) => r.clientId));
     if (clientesElegiveis.size === 0) continue;
 
-    logger.info(`[CobrancaCronica] Empresa "${company.name}" — ${clientesElegiveis.size} cliente(s) com atraso ≥${DIAS_MINIMO_ATRASO_CRONICO} dias`);
+    logger.info(`[CobrancaCronica] Empresa "${company.name}" — ${clientesElegiveis.size} cliente(s) com contrato vencido`);
 
     for (const clientId of clientesElegiveis) {
       try {

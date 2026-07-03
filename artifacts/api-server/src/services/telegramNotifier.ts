@@ -27,11 +27,14 @@ function addDays(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Lembrete de PRÉ-vencimento — só pra contratos que ainda vão vencer (7/3/1
+// dias antes). O dia do vencimento em diante já é responsabilidade da
+// cobrança diária de atraso (overdueAlerts.ts::cobrarClientesAtrasoCronico),
+// não desse lembrete.
 const TARGETS = [
   { days: 7, label: "7 dias", icon: "🟢" },
   { days: 3, label: "3 dias", icon: "🟡" },
   { days: 1, label: "1 dia",  icon: "🟠" },
-  { days: 0, label: "HOJE",   icon: "🔴" },
 ];
 
 // Roda diariamente — notifica admin global + cada empresa com telegram configurado
