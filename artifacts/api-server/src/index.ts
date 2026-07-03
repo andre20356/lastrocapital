@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { checkDueDateNotifications } from "./services/telegramNotifier";
 import { startTelegramCommandPolling } from "./services/telegramCommands";
 import { initWhatsAppInstance, loadPendingPayments } from "./services/whatsappCommands";
+import { cobrarClientesAtrasoCronico } from "./services/overdueAlerts";
 
 const rawPort = process.env["PORT"];
 
@@ -41,6 +42,11 @@ app.listen(port, (err) => {
       const runDaily = () => {
         checkDueDateNotifications().catch((e) =>
           logger.error({ err: e }, "[Telegram] Erro no cron de vencimentos"),
+        );
+        // Cobrança diária pra quem já está vencido há 30+ dias — repete todo
+        // dia até o contrato deixar de aparecer como overdue (pago/renegociado).
+        cobrarClientesAtrasoCronico().catch((e) =>
+          logger.error({ err: e }, "[CobrancaCronica] Erro na cobrança de atraso crônico"),
         );
       };
       runDaily();
