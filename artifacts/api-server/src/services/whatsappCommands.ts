@@ -247,6 +247,14 @@ const NUM_EMOJI = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","
 // ── Evolution API HTTP ────────────────────────────────────────────────────────
 
 export async function sendWA(cfg: WaConfig, phone: string, text: string): Promise<string | null> {
+  // Nunca manda mensagem vazia pro WhatsApp — já aconteceu (causa não confirmada,
+  // provavelmente ligada à instabilidade de conexão de 2026-07-03) e o cliente
+  // recebe um balão em branco sem sentido nenhum.
+  if (!text || !text.trim()) {
+    logger.warn(`[WA] Envio bloqueado — texto vazio pra ${phone}`);
+    return null;
+  }
+
   // @lid: Evolution API aceita o JID completo diretamente como número de destino
   let number: string;
   if (phone.endsWith("@lid")) {
