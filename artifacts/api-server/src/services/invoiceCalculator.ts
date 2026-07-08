@@ -6,13 +6,38 @@ export interface InvoiceLike {
   daysLate?: number | null;
   interestPaid?: boolean | null;
   recurrence?: string | null;
+  dueDate?: string | null;
 }
 
-const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14 };
 
-function periodsLate(days: number, recurrence: string | null | undefined): number {
-  const divisor = PERIOD_DAYS[recurrence ?? "monthly"] ?? 30;
-  return days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
+// Conta quantos vencimentos já ocorreram até hoje (contando o vencimento
+// original como o 1º) — não dias-em-atraso ÷ 30. Essa aproximação de 30 dias
+// subestimava em até 1 mês inteiro qualquer contrato que vence depois do dia
+// 1º do mês (achado real, Lucas gabriel, 2026-07-08: contratos vencidos em
+// 01/06, 04/06 e 07/06 apareciam com "1 mês" quando já deviam junho E julho —
+// 2 vencimentos —, enquanto o de 28/04, com 71 dias, aparecia "2" quando na
+// verdade já são 3 vencimentos — abril, maio e junho). Mensal usa comparação
+// de calendário (dia do mês); as demais recorrências usam dias fixos por
+// período, mas também contam o vencimento original como ocorrência nº 1.
+export function monthsLate(
+  dueDate: string | null | undefined,
+  recurrence: string | null | undefined,
+  today: Date = new Date(),
+): number {
+  if (!dueDate) return 0;
+  const due = new Date(dueDate + "T00:00:00Z");
+  const now = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  if (now < due) return 0;
+
+  if (recurrence && recurrence !== "monthly") {
+    const periodDays = PERIOD_DAYS[recurrence] ?? 30;
+    const daysLate = Math.floor((now.getTime() - due.getTime()) / 86_400_000);
+    return Math.floor(daysLate / periodDays) + 1;
+  }
+
+  const monthDiff = (now.getUTCFullYear() - due.getUTCFullYear()) * 12 + (now.getUTCMonth() - due.getUTCMonth());
+  return now.getUTCDate() >= due.getUTCDate() ? monthDiff + 1 : monthDiff;
 }
 
 // Avança o vencimento pro próximo período de um contrato recorrente — usado
@@ -59,7 +84,7 @@ export function calculateInvoiceBreakdown(invoice: InvoiceLike): InvoiceBreakdow
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
 
-  const periods = periodsLate(days, invoice.recurrence);
+  const periods = monthsLate(invoice.dueDate, invoice.recurrence);
   const interestAmount = ((principal * rate) / 100) * periods;
   const lateFeeTotal = feePerDay * days;
   const total = principal + interestAmount + lateFeeTotal;
@@ -79,7 +104,7 @@ export function calculateInterestOnly(invoice: InvoiceLike): number {
   const rate = parseFloat(invoice.interestRate ?? "0") || 0;
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
-  const periods = periodsLate(days, invoice.recurrence);
+  const periods = monthsLate(invoice.dueDate, invoice.recurrence);
   return ((principal * rate) / 100) * periods + feePerDay * days;
 }
 

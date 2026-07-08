@@ -24,7 +24,7 @@ import {
   Banknote, Calculator, BadgeCheck, Pencil, ClipboardList,
   Clock, XCircle, CircleCheck, ChevronDown, ChevronRight, Search, CalendarX2,
 } from "lucide-react";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, monthsLate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { getGetDashboardSummaryQueryKey, getListCashFlowQueryKey } from "@workspace/api-client-react";
 
@@ -33,13 +33,7 @@ type InvoiceStatus = "pending" | "paid" | "overdue" | "requested" | "current";
 const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
 
 function calcOverdueInstallments(dueDate: string | null | undefined, recurrence: string | null | undefined): number {
-  if (!dueDate) return 0;
-  const due = new Date(dueDate + "T12:00:00Z");
-  const now = new Date();
-  const daysOverdue = Math.max(0, Math.floor((now.getTime() - due.getTime()) / 86_400_000));
-  if (daysOverdue <= 0) return 0;
-  const periodDays = recurrence ? (PERIOD_DAYS[recurrence] ?? 0) : 0;
-  return periodDays > 0 ? Math.max(1, Math.floor(daysOverdue / periodDays)) : 1;
+  return monthsLate(dueDate, recurrence);
 }
 
 interface InvoiceFormData {

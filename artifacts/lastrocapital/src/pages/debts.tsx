@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays, FileText, Users } from "lucide-react";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, monthsLate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
 const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
@@ -19,7 +19,7 @@ function calcOverdueInstallments(
 ): { count: number; dates: string[] } {
   if (!dueDate || daysOverdue <= 0) return { count: 0, dates: [] };
   const periodDays = recurrence ? (PERIOD_DAYS[recurrence] ?? 0) : 0;
-  const count = periodDays > 0 ? Math.max(1, Math.floor(daysOverdue / periodDays)) : 1;
+  const count = monthsLate(dueDate, recurrence);
   const dates: string[] = [];
   const start = new Date(dueDate + "T12:00:00Z");
   for (let i = 0; i < count; i++) {

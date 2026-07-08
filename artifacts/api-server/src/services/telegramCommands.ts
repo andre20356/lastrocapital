@@ -2,6 +2,7 @@ import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTa
 import { eq, and, ilike, ne, or } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { removePendingPayment, sendWA, type WaConfig } from "./whatsappCommands";
+import { monthsLate as calcMonthsLate } from "./invoiceCalculator";
 
 // ── Conversa para /cobranca ───────────────────────────────────────────────────
 
@@ -62,11 +63,11 @@ function parseBRL(text: string): number {
   return parseFloat(text.trim().replace(/[R$\s.]/g, "").replace(",", ".")) || 0;
 }
 
+// Divisor de dias por período, usado só pra fatiar o detalhamento visual por
+// período nas mensagens — a contagem de quantos períodos estão em atraso vem
+// de calcMonthsLate (invoiceCalculator.ts), que usa o vencimento real em vez
+// de dias÷30.
 const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
-function periodsLate(days: number, recurrence: string | null | undefined): number {
-  const divisor = PERIOD_DAYS[recurrence ?? "monthly"] ?? 30;
-  return days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
-}
 function periodLabel(recurrence: string | null | undefined, count: number): string {
   const labels: Record<string, [string, string]> = {
     daily:    ["dia",      "dias"],
@@ -513,7 +514,7 @@ async function handleConversationStep(
       const principal = parseFloat(inv.amount ?? "0") || 0;
       const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
       const rate      = parseFloat(inv.interestRate ?? "0") || 0;
-      const monthsLateTg = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
+      const monthsLateTg = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
       const multa     = feePerDay * daysLate;
       const juros     = (principal * rate) / 100 * (monthsLateTg || 1);
       const companyId = state.qt_clientCompanyId!;
@@ -659,7 +660,7 @@ function buildInvoiceDetail(
   const principal  = parseFloat(inv.amount ?? "0") || 0;
   const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
   const rate       = parseFloat(inv.interestRate ?? "0") || 0;
-  const monthsLate = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
+  const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
   const multa      = feePerDay * daysLate;
   const jurosMes   = (principal * rate) / 100;
   const jurosTotal = jurosMes * monthsLate;
@@ -819,7 +820,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
     const feePerDay  = parseFloat(row.lateFee ?? "0") || 0;
     const rate       = parseFloat(row.interestRate ?? "0") || 0;
     const multa      = feePerDay * daysLate;
-    const monthsLate = periodsLate(daysLate, row.recurrence) || 1;
+    const monthsLate = calcMonthsLate(row.dueDate, row.recurrence) || 1;
     const jurosMes   = (principal * rate) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total      = principal + jurosTotal + multa;
@@ -1015,7 +1016,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       .reduce((sum, i) => {
         if (!i.dueDate) return sum + 1;
         const daysLate = Math.max(0, Math.floor((todayMs - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-        return sum + Math.max(1, periodsLate(daysLate, i.recurrence));
+        return sum + Math.max(1, calcMonthsLate(i.dueDate, i.recurrence));
       }, 0);
     const overdueInvTag = overdueInvCount > 0
       ? ` | ⚠️ <b>${overdueInvCount} parcela${overdueInvCount > 1 ? "s" : ""} em atraso</b>` : "";
@@ -1038,7 +1039,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       const principal  = parseFloat(inv.amount ?? "0") || 0;
       const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
       const rate       = parseFloat(inv.interestRate ?? "0") || 0;
-      const monthsLate = inv.status === "overdue" ? periodsLate(daysLate, inv.recurrence) : 0;
+      const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
       const multa      = feePerDay * daysLate;
       const jurosMes   = (principal * rate) / 100;
       const jurosTotal = jurosMes * monthsLate;
@@ -1071,7 +1072,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       .reduce((sum, i) => {
         if (!i.dueDate) return sum + 1;
         const daysLate = Math.max(0, Math.floor((todayMs - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-        return sum + Math.max(1, periodsLate(daysLate, i.recurrence));
+        return sum + Math.max(1, calcMonthsLate(i.dueDate, i.recurrence));
       }, 0);
     if (overdueCount > 0) {
       lines.push(`\n   ━━━━━━━━━━━━━━━━━━━━`);
@@ -1137,7 +1138,7 @@ function calcClientTotals(invoices: Array<typeof invoicesTable.$inferSelect>) {
     const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
     const daysLate = inv.status === "overdue" && due
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-    const monthsLate = periodsLate(daysLate, inv.recurrence);
+    const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
     const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
@@ -1167,7 +1168,7 @@ async function sendClientExtrato(token: string, chatId: number, clientId: number
     const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
     const daysLate = inv.status === "overdue" && due
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-    const monthsLate = periodsLate(daysLate, inv.recurrence);
+    const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
     const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
@@ -1545,7 +1546,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                   const p    = parseFloat(inv.amount ?? "0") || 0;
                   const fee  = parseFloat(inv.lateFee ?? "0") || 0;
                   const rate = parseFloat(inv.interestRate ?? "0") || 0;
-                  const pd   = periodsLate(dl, inv.recurrence);
+                  const pd   = calcMonthsLate(inv.dueDate, inv.recurrence);
                   const encargos = fee * dl + (p * rate / 100) * (pd || 1);
                   // Valor deve bater dentro de ±15% dos encargos E ser menor que 80% do principal
                   // (evita confundir pagamento parcial de principal com juros)
@@ -1859,7 +1860,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                 const overdueCount = invoices.filter(i => i.status === "overdue").reduce((sum, i) => {
                   if (!i.dueDate) return sum + 1;
                   const dl = Math.max(0, Math.floor((today.getTime() - new Date(i.dueDate + "T00:00:00Z").getTime()) / 86_400_000));
-                  return sum + Math.max(1, periodsLate(dl, i.recurrence));
+                  return sum + Math.max(1, calcMonthsLate(i.dueDate, i.recurrence));
                 }, 0);
                 const overdueTag = overdueCount > 0 ? ` | ⚠️ <b>${overdueCount} parcela${overdueCount > 1 ? "s" : ""} em atraso</b>` : "";
                 const header = `👤 <b>${client.name}</b>${phone}${refTag}\n📋 <b>${invoices.length} contrato${invoices.length > 1 ? "s" : ""}</b>${overdueTag} — escolha um:\n\n`;
