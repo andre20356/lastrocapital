@@ -1,7 +1,7 @@
 import { eq, and, lt, notInArray, sql } from "drizzle-orm";
 import { db, clientsTable, invoicesTable, companiesTable } from "@workspace/db";
 import { calculateInvoiceBreakdown } from "./invoiceCalculator";
-import { sendWA } from "./whatsappCommands";
+import { sendWA, empresaWhatsAppConectado } from "./whatsappCommands";
 import { logger } from "../lib/logger";
 
 const fmt = (v: number) =>
@@ -53,7 +53,10 @@ export async function montarEEnviarAlertaAtraso(
     .from(companiesTable)
     .where(eq(companiesTable.id, companyId));
 
-  if (!company?.whatsappInstance || company.whatsappStatus !== "connected") {
+  if (!company?.whatsappInstance) {
+    return { ok: false, motivo: "WhatsApp da empresa não está conectado" };
+  }
+  if (!(await empresaWhatsAppConectado(company))) {
     return { ok: false, motivo: "WhatsApp da empresa não está conectado" };
   }
 
@@ -116,7 +119,15 @@ export async function montarEEnviarAlertaAtraso(
     companyId,
   };
 
-  await sendWA(cfg, client.phone, msg);
+  // whatsapp_jid (@lid) é só pra RECONHECER mensagens recebidas — pode ficar
+  // desatualizado (troca de aparelho/reinstalação) sem que ninguém perceba.
+  // Achado real: Michael teixeira (cliente 20) tinha @lid salvo apontando pra
+  // um identificador que não existe mais na rede do WhatsApp (fetchProfile
+  // retornou exists:false), enquanto o telefone continuava 100% válido e
+  // confirmado como recebido. Envio sempre pelo telefone — é o único canal
+  // verificável via chat/whatsappNumbers antes de mandar.
+  const sentJid = await sendWA(cfg, client.phone, msg);
+  if (!sentJid) return { ok: false, motivo: "Falha ao enviar mensagem via WhatsApp (ver logs de [WA])" };
 
   return { ok: true, sentTo: client.phone, clientName: client.name };
 }
@@ -132,7 +143,7 @@ export async function cobrarClientesAtrasoCronico(): Promise<void> {
   const companies = await db.select().from(companiesTable);
 
   for (const company of companies) {
-    if (!company.whatsappInstance || company.whatsappStatus !== "connected") continue;
+    if (!(await empresaWhatsAppConectado(company))) continue;
 
     const vencidosDaCompany = await db
       .select({ clientId: invoicesTable.clientId })

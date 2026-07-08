@@ -160,7 +160,7 @@ router.post(
       planKey,
       returnUrl,
       completionUrl,
-      companyId: req.companyId,
+      companyId: String(req.companyId),
     });
 
     const now = new Date();

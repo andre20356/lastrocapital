@@ -1,7 +1,7 @@
 import { db, invoicesTable, clientsTable, companiesTable } from "@workspace/db";
 import { eq, and, ne, isNotNull } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { sendWA, saveJidMapping, type WaConfig } from "./whatsappCommands";
+import { sendWA, saveJidMapping, empresaWhatsAppConectado, type WaConfig } from "./whatsappCommands";
 
 // Notificação para o admin do SaaS (env vars)
 const ADMIN_TOKEN   = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -60,6 +60,7 @@ export async function checkDueDateNotifications(): Promise<void> {
         invoiceId:           invoicesTable.id,
         amount:              invoicesTable.amount,
         dueDate:             invoicesTable.dueDate,
+        notes:               invoicesTable.notes,
         companyId:           invoicesTable.companyId,
         clientId:            clientsTable.id,
         clientName:          clientsTable.name,
@@ -139,6 +140,7 @@ export async function checkDueDateNotifications(): Promise<void> {
         `━━━━━━━━━━━━━━━━━━━\n\n` +
         `${icon} Olá, <b>${r.clientName ?? "cliente"}</b>!\n\n` +
         `Seu pagamento de <b>${valor}</b> ${venceTexto}.\n\n` +
+        (r.notes ? `📝 ${r.notes}\n\n` : "") +
         alerteHoje +
         `Use /start para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
         `Qualquer dúvida, entre em contato conosco. 😊`;
@@ -155,7 +157,7 @@ export async function checkDueDateNotifications(): Promise<void> {
 
       for (const r of waClientRows) {
         const company = companies.find((c) => c.id === r.companyId);
-        if (!company?.whatsappInstance || company.whatsappStatus !== "connected") {
+        if (!company?.whatsappInstance || !(await empresaWhatsAppConectado(company))) {
           logger.warn(`[WA] Empresa ${r.companyId} sem WhatsApp conectado — pulando cliente ${r.clientName}`);
           continue;
         }
@@ -191,11 +193,15 @@ export async function checkDueDateNotifications(): Promise<void> {
           `━━━━━━━━━━━━━━━━━━━\n\n` +
           `${icon} Olá, *${r.clientName ?? "cliente"}*!\n\n` +
           `Seu pagamento de *${valor}* ${venceTexto}.\n\n` +
+          (r.notes ? `📝 ${r.notes}\n\n` : "") +
           alerteHoje +
           `Responda *menu* para consultar seus contratos, ver detalhes e realizar pagamentos. 🤖\n\n` +
           `Qualquer dúvida, entre em contato conosco. 😊\n\n` +
           `*${company.name ?? ""}*`;
 
+        // whatsapp_jid (@lid) é só pra reconhecer mensagens recebidas — pode ficar
+        // desatualizado sem avisar (ver nota em overdueAlerts.ts). Envio sempre
+        // pelo telefone, único canal verificado.
         const remoteJid = await sendWA(waCfg, r.clientPhone!, clientMsg).catch((e: any) => {
           logger.warn(`[WA] Falha ao notificar cliente ${r.clientName}: ${e.message}`);
           return null;

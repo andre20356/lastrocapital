@@ -48,7 +48,35 @@ interface WaConvState {
   cl_invoices?: Array<typeof invoicesTable.$inferSelect>;
 }
 
-const waConversations = new Map<string, WaConvState>();
+// Expira conversas paradas há muito tempo — evita que um fluxo abandonado
+// (ex: cliente saiu no meio do pagamento e voltou a falar de outro assunto)
+// continue interceptando mensagens não relacionadas indefinidamente.
+const CONV_TTL_MS = 20 * 60 * 1000; // 20 minutos de inatividade
+class ExpiringConvMap {
+  private data = new Map<string, WaConvState>();
+  private touchedAt = new Map<string, number>();
+  private expired(key: string): boolean {
+    const ts = this.touchedAt.get(key);
+    return ts !== undefined && Date.now() - ts > CONV_TTL_MS;
+  }
+  set(key: string, value: WaConvState): void {
+    this.data.set(key, value);
+    this.touchedAt.set(key, Date.now());
+  }
+  get(key: string): WaConvState | undefined {
+    if (this.expired(key)) { this.delete(key); return undefined; }
+    return this.data.get(key);
+  }
+  has(key: string): boolean {
+    if (this.expired(key)) { this.delete(key); return false; }
+    return this.data.has(key);
+  }
+  delete(key: string): void {
+    this.data.delete(key);
+    this.touchedAt.delete(key);
+  }
+}
+const waConversations = new ExpiringConvMap();
 
 // Dedup: mesma mensagem pode chegar duas vezes (versão @lid + versão real phone)
 const processedMsgIds = new Set<string>();
@@ -667,7 +695,7 @@ async function buildClientMenuMsgWA(companyId: number): Promise<string> {
     `${b("2")} — 📊 Ver meu extrato\n` +
     `${b("3")} — 💳 Efetuar pagamento via PIX\n\n` +
     `${it("Responda com o número da opção.")}\n` +
-    `${it("A qualquer momento, envie 0 ou \"menu\" para voltar aqui.")}`
+    `${it("A qualquer momento, envie 0 ou \"menu\" para voltar aqui, ou \"sair\" para encerrar.")}`
   );
 }
 
@@ -705,7 +733,9 @@ async function sendClientContratosWA(cfg: WaConfig, phone: string, clientId: num
     const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
     const principal = parseFloat(inv.amount ?? "0") || 0;
     const numTag = i < NUM_EMOJI.length ? NUM_EMOJI[i] : `${i + 1}.`;
-    msg += `${numTag} ${STATUS_LABEL[inv.status] ?? inv.status} — ${b(dueFmt)}\n   💰 ${fmtBRL(principal)}\n\n`;
+    msg += `${numTag} ${STATUS_LABEL[inv.status] ?? inv.status} — ${b(dueFmt)}\n   💰 ${fmtBRL(principal)}`;
+    if (inv.notes) msg += `\n   📝 ${inv.notes}`;
+    msg += `\n\n`;
   });
   msg += `${it("Para detalhes financeiros, escolha a opção 2 (Extrato).")}`;
   await sendWAChunked(cfg, phone, msg);
@@ -743,6 +773,7 @@ async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: numbe
     if (jurosMes > 0) msg += monthsLate > 1
       ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${monthsLate} = ${fmtBRL(jurosTotal)}`
       : `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
+    if (inv.notes) msg += `\n📝 ${inv.notes}`;
     msg += `\n💸 Total: ${b(fmtBRL(total))}\n\n`;
   }
   msg += `━━━━━━━━━━━━━━━━━━━━\n💸 ${b(`Total em aberto: ${fmtBRL(totalAmount)}`)}\n\nDigite ${b("3")} para ver a opção de pagamento.`;
@@ -848,6 +879,14 @@ async function handleClientStepWA(
 ): Promise<void> {
   const input = text.trim();
   const inputLower = input.toLowerCase();
+
+  // Sair do bot: encerra o atendimento sem reabrir o menu — útil quando o assunto
+  // muda pra algo fora do fluxo (ex: cliente já pagou e a conversa segue livre).
+  if (inputLower === "sair" || inputLower === "encerrar" || inputLower === "tchau") {
+    waConversations.delete(convKey);
+    await sendWA(cfg, phone, `👋 Ok, encerrei o atendimento por aqui.\n\n${it("Quando precisar, é só digitar")} ${b("menu")}.`);
+    return;
+  }
 
   // Voltar ao menu: "0", "menu", "/start", "cancelar" em qualquer etapa do fluxo cliente
   if (input === "0" || inputLower === "menu" || inputLower === "/start" || inputLower === "cancelar" || inputLower === "/cancelar") {
@@ -1266,9 +1305,9 @@ async function handleConvStepWA(cfg: WaConfig, phone: string, text: string, stat
         // Notificar o cliente via WhatsApp (número diferente do admin)
         try {
           if (state.qt_clientId) {
-            const [clientRow] = await db.select({ phone: clientsTable.phone, whatsappJid: clientsTable.whatsappJid })
+            const [clientRow] = await db.select({ phone: clientsTable.phone })
               .from(clientsTable).where(eq(clientsTable.id, state.qt_clientId)).limit(1);
-            const clientPhone = clientRow?.whatsappJid ?? clientRow?.phone;
+            const clientPhone = clientRow?.phone;
             const adminNorm = normalizePhoneForWA(phone);
             if (clientPhone && clientPhone !== adminNorm && clientPhone !== phone) {
               const dueFmt = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z").toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "";
@@ -1659,6 +1698,51 @@ export async function initWhatsAppInstance(cfg: WaConfig, webhookUrl: string): P
   } catch (e: any) {
     logger.warn(`[WA] Erro ao inicializar instância: ${e.message}`);
   }
+}
+
+// Consulta direta o estado real da sessão na Evolution API — usado como fallback
+// quando o whatsapp_status do banco diz "disconnected" mas pode estar apenas
+// dessincronizado (ex: evento connection.update "open" da reconexão não chegou).
+export async function checkInstanceConnected(cfg: Pick<WaConfig, "apiUrl" | "apiKey" | "instance">): Promise<boolean> {
+  try {
+    const res = await fetch(`${cfg.apiUrl}/instance/connectionState/${cfg.instance}`, {
+      headers: { apikey: cfg.apiKey },
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as any;
+    const state = data?.instance?.state ?? data?.state;
+    return state === "open";
+  } catch {
+    return false;
+  }
+}
+
+// whatsapp_status no banco só é atualizado pelo webhook connection.update.
+// Se esse evento se perder numa reconexão rápida, o flag fica preso em
+// "disconnected" pra sempre e trava os avisos automáticos (cobrança de
+// atraso e lembrete de vencimento) mesmo com o WhatsApp funcionando de
+// verdade (bug real: MARA BANK, 2026-07-08 — caiu 04:20 BRT, reconectou
+// sozinho, cron das 08:00 pulou clientes porque o banco nunca soube da
+// reconexão). Antes de desistir de um company "disconnected", confirma
+// direto na Evolution API e, se estiver aberta, já corrige o flag
+// (auto-cura) em vez de só usar pra essa rodada.
+export async function empresaWhatsAppConectado(
+  company: Pick<typeof companiesTable.$inferSelect, "id" | "name" | "whatsappInstance" | "whatsappStatus">,
+): Promise<boolean> {
+  if (!company.whatsappInstance) return false;
+  if (company.whatsappStatus === "connected") return true;
+
+  const cfg = {
+    apiUrl: process.env.EVOLUTION_SERVER_URL ?? "http://evolution:8080",
+    apiKey: process.env.EVOLUTION_API_KEY ?? "",
+    instance: company.whatsappInstance,
+  };
+  const realmenteAberto = await checkInstanceConnected(cfg);
+  if (!realmenteAberto) return false;
+
+  logger.warn(`[WA] Empresa "${company.name}" estava "disconnected" no banco mas Evolution reporta "open" — corrigindo flag (auto-cura)`);
+  await db.update(companiesTable).set({ whatsappStatus: "connected" }).where(eq(companiesTable.id, company.id));
+  return true;
 }
 
 export async function getWhatsAppQR(cfg: WaConfig): Promise<{ qrcode?: string; state?: string; pairingCode?: string }> {

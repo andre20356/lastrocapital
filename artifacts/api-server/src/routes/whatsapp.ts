@@ -48,6 +48,22 @@ router.post("/api/webhook/whatsapp", async (req, res) => {
       } catch (e: any) {
         logger.warn(`[WA] Erro ao salvar número conectado: ${e.message}`);
       }
+    } else if (state === "close" && instanceName) {
+      // Sem isso, whatsappStatus só andava pra "connected" e nunca voltava —
+      // uma queda de sessão real (ex: logout 401) deixava o banco dizendo
+      // "connected" pra sempre, escondendo a falha da cobrança automática.
+      try {
+        const [company] = await db.select().from(companiesTable)
+          .where(eq(companiesTable.whatsappInstance, instanceName)).limit(1);
+        if (company && company.whatsappStatus === "connected") {
+          await db.update(companiesTable)
+            .set({ whatsappStatus: "disconnected" })
+            .where(eq(companiesTable.id, company.id));
+          logger.warn(`[WA] Instância "${instanceName}" caiu — status marcado como desconectado`);
+        }
+      } catch (e: any) {
+        logger.warn(`[WA] Erro ao marcar desconexão: ${e.message}`);
+      }
     }
     return;
   }

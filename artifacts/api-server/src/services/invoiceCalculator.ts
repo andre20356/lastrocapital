@@ -15,6 +15,30 @@ function periodsLate(days: number, recurrence: string | null | undefined): numbe
   return days > 0 ? Math.max(1, Math.floor(days / divisor)) : 0;
 }
 
+// Avança o vencimento pro próximo período de um contrato recorrente — usado
+// quando só os juros/multa foram pagos (não o principal), pra fatura sumir da
+// cobrança automática (que decide por due_date, não por status) até o próximo
+// vencimento. Preserva o dia original quando possível: setUTCMonth() sozinho
+// estoura pro mês seguinte quando o dia não existe no mês de destino
+// (ex.: 31/05 -> 01/07 em vez de 30/06).
+export function advanceRecurrenceDueDate(currentDueDate: string, recurrence: string): string {
+  const base = new Date(currentDueDate + "T12:00:00Z");
+  if (recurrence === "monthly") {
+    const day = base.getUTCDate();
+    base.setUTCDate(1);
+    base.setUTCMonth(base.getUTCMonth() + 1);
+    const lastDayOfMonth = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+    base.setUTCDate(Math.min(day, lastDayOfMonth));
+  } else if (recurrence === "weekly") {
+    base.setUTCDate(base.getUTCDate() + 7);
+  } else if (recurrence === "biweekly") {
+    base.setUTCDate(base.getUTCDate() + 14);
+  } else if (recurrence === "daily") {
+    base.setUTCDate(base.getUTCDate() + 1);
+  }
+  return base.toISOString().split("T")[0]!;
+}
+
 export interface InvoiceBreakdown {
   principal: number;
   interestAmount: number;

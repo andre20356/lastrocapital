@@ -119,7 +119,7 @@ adminRouter.get("/admin/subscribers", requireAdmin, async (_req, res): Promise<v
 // DELETE /api/admin/subscribers/:id/whatsapp — desconecta WhatsApp de um assinante
 adminRouter.delete("/admin/subscribers/:id/whatsapp", requireAdmin, async (req, res): Promise<void> => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(String(req.params.id), 10);
     if (isNaN(id)) { res.status(400).json({ error: "ID inválido" }); return; }
 
     const [company] = await db.select().from(companiesTable).where(eq(companiesTable.id, id));

@@ -87,7 +87,7 @@ services:
       - web
 
   evolution:
-    image: atendai/evolution-api:v2.1.2
+    image: atendai/evolution-api:v2.3.7
     container_name: lastrocapital_evolution
     restart: unless-stopped
     ports:
