@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useListDebts, getListDebtsQueryKey, useUpdateDebt, getGetDashboardSummaryQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays, FileText } from "lucide-react";
+import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays, FileText, Users } from "lucide-react";
 import { formatCurrency } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
@@ -32,6 +32,15 @@ function calcOverdueInstallments(
     dates.push(d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }));
   }
   return { count, dates };
+}
+
+// Contratos de indicador (ex.: Lucas) vêm com o mesmo clientName mas notes
+// "Ref. Fulano" identificando quem é o cliente de verdade por trás daquele
+// contrato específico — extrai esse nome pra usar como rótulo na subseção.
+function extractReferido(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const m = notes.match(/ref\.?\s*(.+)/i);
+  return m?.[1]?.trim() || null;
 }
 
 const FILTER_TABS = [
@@ -66,6 +75,24 @@ export default function Debts() {
       }
     );
   };
+
+  // Agrupa por cliente (preservando a ordem de chegada) pra identificar
+  // indicadores como o Lucas, que têm vários contratos no mesmo cadastro —
+  // grupos com mais de 1 contrato ganham uma subseção na tabela.
+  type DebtRow = NonNullable<typeof debts>[number];
+  const groupedDebts: { clientId: number; clientName: string; items: DebtRow[] }[] = [];
+  {
+    const indexByClient = new Map<number, number>();
+    for (const d of debts ?? []) {
+      const idx = indexByClient.get(d.clientId);
+      if (idx === undefined) {
+        indexByClient.set(d.clientId, groupedDebts.length);
+        groupedDebts.push({ clientId: d.clientId, clientName: d.clientName ?? `Cliente #${d.clientId}`, items: [d] });
+      } else {
+        groupedDebts[idx]!.items.push(d);
+      }
+    }
+  }
 
   const openDebts  = debts?.filter((d) => d.status === "open") ?? [];
   const closedDebts = debts?.filter((d) => d.status === "closed") ?? [];
@@ -206,7 +233,21 @@ export default function Debts() {
                 </tr>
               </thead>
               <tbody>
-                {debts.map((debt) => {
+                {groupedDebts.map((group) => (
+                  <Fragment key={group.clientId}>
+                    {group.items.length > 1 && (
+                      <tr className="bg-muted/40 border-b border-border/60">
+                        <td colSpan={6} className="px-5 py-2">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                            <Users className="h-3.5 w-3.5" />
+                            {group.clientName} — indicador · {group.items.length} contratos
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {group.items.map((debt) => {
+                  const isGrouped = group.items.length > 1;
+                  const referido = isGrouped ? extractReferido(debt.invoiceNotes) : null;
                   const isUrgent = debt.daysOverdue > 30;
                   const { count: overdueCount, dates: overdueDates } = calcOverdueInstallments(
                     debt.daysOverdue,
@@ -220,18 +261,22 @@ export default function Debts() {
                       className="border-b border-border last:border-0 hover:bg-accent/40 transition-colors group"
                       data-testid={`row-debt-${debt.id}`}
                     >
-                      <td className="px-5 py-3.5 font-medium text-sm">
-                        <div>{debt.clientName ?? `Cliente #${debt.clientId}`}</div>
+                      <td className={`px-5 py-3.5 font-medium text-sm ${isGrouped ? "pl-8" : ""}`}>
+                        {isGrouped ? (
+                          <div>{referido ?? `Contrato #${debt.invoiceId}`}</div>
+                        ) : (
+                          <div>{debt.clientName ?? `Cliente #${debt.clientId}`}</div>
+                        )}
                         {debt.invoiceId && (
                           <div className="text-xs text-muted-foreground/60 mt-0.5">Contrato #{debt.invoiceId}</div>
                         )}
-                        {debt.invoiceNotes && (
+                        {debt.invoiceNotes && !isGrouped && (
                           <div className="flex items-start gap-1 mt-1 max-w-[220px]">
                             <FileText className="h-3 w-3 text-muted-foreground/50 shrink-0 mt-0.5" />
                             <span className="text-xs text-muted-foreground/70 italic whitespace-pre-wrap break-words">{debt.invoiceNotes}</span>
                           </div>
                         )}
-                        {debt.invoiceNotes && debt.invoiceNotesUpdatedAt && (
+                        {debt.invoiceNotes && debt.invoiceNotesUpdatedAt && !isGrouped && (
                           <div className="text-xs text-muted-foreground/40 mt-0.5 pl-4">
                             {new Date(debt.invoiceNotesUpdatedAt).toLocaleDateString("pt-BR")}
                           </div>
@@ -337,7 +382,9 @@ export default function Debts() {
                       </td>
                     </tr>
                   );
-                })}
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
 

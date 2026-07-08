@@ -214,6 +214,10 @@ export interface Invoice {
   dueDate?: string | null;
   /** @nullable */
   recurrence?: InvoiceRecurrence;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  notesUpdatedAt?: string | null;
   createdAt: string;
 }
 
@@ -260,6 +264,8 @@ export interface InvoiceInput {
    * @minimum 0
    */
   daysLate?: number;
+  /** @maxLength 1000 */
+  notes?: string;
 }
 
 export type InvoiceUpdateStatus =
@@ -285,6 +291,8 @@ export interface InvoiceUpdate {
   daysLate?: number;
   /** Marca os juros e multa como pagos separadamente */
   interestPaid?: boolean;
+  /** @maxLength 1000 */
+  notes?: string;
 }
 
 export type DebtStatus = (typeof DebtStatus)[keyof typeof DebtStatus];
@@ -312,6 +320,10 @@ export interface Debt {
   invoiceInterestRate?: number | null;
   /** @nullable */
   invoiceLateFee?: number | null;
+  /** @nullable */
+  invoiceNotes?: string | null;
+  /** @nullable */
+  invoiceNotesUpdatedAt?: string | null;
   status: DebtStatus;
   daysOverdue: number;
 }

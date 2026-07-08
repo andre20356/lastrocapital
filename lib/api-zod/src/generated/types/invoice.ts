@@ -38,14 +38,14 @@ export interface Invoice {
   interestPaid?: boolean | null;
   /** @nullable */
   totalDue?: number | null;
-  /** @nullable */
-  notes?: string | null;
-  /** @nullable */
-  notesUpdatedAt?: Date | null;
   status: InvoiceStatus;
   /** @nullable */
   dueDate?: Date | null;
   /** @nullable */
   recurrence?: InvoiceRecurrence;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  notesUpdatedAt?: Date | null;
   createdAt: Date;
 }

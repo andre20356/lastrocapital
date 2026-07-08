@@ -30,5 +30,6 @@ export interface InvoiceInput {
    * @minimum 0
    */
   daysLate?: number;
+  /** @maxLength 1000 */
   notes?: string;
 }

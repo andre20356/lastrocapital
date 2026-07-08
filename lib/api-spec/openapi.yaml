@@ -766,6 +766,11 @@ components:
         recurrence:
           type: ["string", "null"]
           enum: [daily, weekly, biweekly, monthly, "null"]
+        notes:
+          type: ["string", "null"]
+        notesUpdatedAt:
+          type: ["string", "null"]
+          format: date-time
         createdAt:
           type: string
           format: date-time
@@ -800,6 +805,9 @@ components:
           type: integer
           minimum: 0
           description: Número de dias de atraso
+        notes:
+          type: string
+          maxLength: 1000
 
     InvoiceUpdate:
       type: object
@@ -824,6 +832,9 @@ components:
         interestPaid:
           type: boolean
           description: Marca os juros e multa como pagos separadamente
+        notes:
+          type: string
+          maxLength: 1000
 
     Debt:
       type: object
@@ -850,6 +861,11 @@ components:
           type: ["number", "null"]
         invoiceLateFee:
           type: ["number", "null"]
+        invoiceNotes:
+          type: ["string", "null"]
+        invoiceNotesUpdatedAt:
+          type: ["string", "null"]
+          format: date-time
         status:
           type: string
           enum: [open, closed]

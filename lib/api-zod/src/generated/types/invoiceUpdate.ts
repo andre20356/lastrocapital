@@ -19,5 +19,6 @@ export interface InvoiceUpdate {
   daysLate?: number;
   /** Marca os juros e multa como pagos separadamente */
   interestPaid?: boolean;
+  /** @maxLength 1000 */
   notes?: string;
 }
