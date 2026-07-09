@@ -726,9 +726,8 @@ export default function Invoices() {
                     const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
                     const isOverdueWithFees = isOverdue && hasCharges;
                     const daysLateCalc = inv.daysLate ?? 0;
-                    const periodDivisorCalc = PERIOD_DAYS[inv.recurrence ?? "monthly"] ?? 30;
-                    const monthsLateCalc = daysLateCalc > 0 ? Math.max(1, Math.floor(daysLateCalc / periodDivisorCalc)) : 0;
-                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * (monthsLateCalc || 1) : 0;
+                    const monthsLateCalc = monthsLate(inv.dueDate, inv.recurrence);
+                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * monthsLateCalc : 0;
                     const lateFeeTotal = (inv.lateFee ?? 0) * daysLateCalc;
                     const alreadyPaidInterest = inv.interestPaid === true;
                     const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];

@@ -44,7 +44,8 @@ export async function montarEEnviarAlertaAtraso(
       eq(invoicesTable.clientId, clientId),
       lt(invoicesTable.dueDate, sql`CURRENT_DATE`),
       notInArray(invoicesTable.status, ["paid", "requested"]),
-    ));
+    ))
+    .orderBy(invoicesTable.dueDate);
 
   if (overdue.length === 0) return { ok: false, motivo: "Cliente não possui faturas em atraso" };
 
@@ -93,8 +94,8 @@ export async function montarEEnviarAlertaAtraso(
       `   Juros: ${fmt(interestAmount)}\n` +
       `   Taxa de atraso: ${fmt(feePerDay)}/dia\n` +
       `   Dias em atraso: ${totalDays} dia${totalDays !== 1 ? "s" : ""} (cobrança a partir do 3º dia)\n` +
-      `   Total encargos: ${fmt(encargos)}\n` +
-      `   Subtotal: *${fmt(total)}*`
+      `   Subtotal: ${fmt(encargos)}\n` +
+      `   Quitação: *${fmt(total)}*`
     );
   }).filter(Boolean).join("\n\n");
 

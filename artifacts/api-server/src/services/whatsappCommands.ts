@@ -574,7 +574,11 @@ async function buildClientMessageWA(name: string, companyId?: number): Promise<s
             : `\n   📈 Juros: ${fmtBRL(jurosTotal)}`;
         }
         if (multa > 0) entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
-        if (multa > 0 || jurosMes > 0) entry += `\n   💸 ${b(`Quitação: ${fmtBRL(total)}`)}`;
+        if (multa > 0 || jurosMes > 0) {
+          const encargos = multa + (monthsLate > 0 ? jurosTotal : 0);
+          entry += `\n   Subtotal: ${fmtBRL(encargos)}`;
+          entry += `\n   💸 ${b(`Quitação: ${fmtBRL(total)}`)}`;
+        }
         totalAberto += total;
       }
       if (inv.notes) entry += `\n   📝 ${it(inv.notes)}`;
