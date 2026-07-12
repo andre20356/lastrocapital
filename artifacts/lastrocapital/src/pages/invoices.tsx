@@ -727,7 +727,14 @@ export default function Invoices() {
                     const isOverdueWithFees = isOverdue && hasCharges;
                     const daysLateCalc = inv.daysLate ?? 0;
                     const monthsLateCalc = monthsLate(inv.dueDate, inv.recurrence);
-                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * monthsLateCalc : 0;
+                    // Fatura recorrente sempre tem ao menos 1 ciclo de juros a exibir, mesmo em
+                    // dia (o cliente pode querer adiantar) — monthsLateCalc é 0 antes do
+                    // vencimento, o que mostrava "Juros = R$ 0,00" numa fatura em dia (achado
+                    // real: Danilo, contrato #46). Sem efeito quando já vencida (monthsLateCalc
+                    // já vem ≥ 1 nesse caso). Espelha o mesmo ajuste do bot (calcClientTotalsWA).
+                    const isRecurringInv = !!inv.recurrence;
+                    const interestPeriods = isRecurringInv ? Math.max(1, monthsLateCalc) : monthsLateCalc;
+                    const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * interestPeriods : 0;
                     const lateFeeTotal = (inv.lateFee ?? 0) * daysLateCalc;
                     const alreadyPaidInterest = inv.interestPaid === true;
                     const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];

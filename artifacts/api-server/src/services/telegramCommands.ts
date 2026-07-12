@@ -1192,16 +1192,24 @@ async function sendClientExtrato(token: string, chatId: number, clientId: number
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
+    // Fatura recorrente sempre tem ao menos 1 ciclo de juros a exibir, mesmo em dia
+    // (o cliente pode querer adiantar) — mesmo ajuste já aplicado em calcClientTotals
+    // (menu de pagamento). Sem isso, o extrato omitia a linha de juros inteira numa
+    // fatura ainda não vencida, porque monthsLate é 0 antes do vencimento (achado
+    // real: Danilo, contrato #46, em dia, extrato não mostrava o juros de R$150).
+    const isRecurring  = !!inv.recurrence && inv.recurrence !== "none";
+    const jurosPeriods = isRecurring ? Math.max(1, monthsLate) : monthsLate;
+    const jurosDisplay = jurosMes * jurosPeriods;
     const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
     msg += `${STATUS_LABEL[inv.status] ?? inv.status} — venc. <b>${dueFmt}</b>\n`;
     msg += `💰 Principal: ${fmtBRL(principal)}`;
     if (daysLate > 0) {
       msg += `\n📅 ${daysLate} dias em atraso (${monthsLate} ${periodLabel(inv.recurrence, monthsLate)})`;
       if (multa > 0) msg += `\n⚠️ Multa: ${fmtBRL(multa)}`;
-      if (jurosMes > 0) msg += monthsLate > 1
-        ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${monthsLate} = ${fmtBRL(jurosTotal)}`
-        : `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
     }
+    if (jurosDisplay > 0) msg += jurosPeriods > 1
+      ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${jurosPeriods} = ${fmtBRL(jurosDisplay)}`
+      : `\n📈 Juros: ${fmtBRL(jurosDisplay)}`;
     msg += `\n💸 Total: <b>${fmtBRL(total)}</b>\n\n`;
   }
   msg += `━━━━━━━━━━━━━━━━━━━━\n💸 <b>Total em aberto: ${fmtBRL(totalAmount)}</b>\n\nDigite <b>3</b> para ver a opção de pagamento.`;

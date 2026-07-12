@@ -804,14 +804,22 @@ async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: numbe
     const jurosMes   = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
+    // Fatura recorrente sempre tem ao menos 1 ciclo de juros a exibir, mesmo em dia
+    // (o cliente pode querer adiantar) — mesmo ajuste já aplicado em calcClientTotalsWA
+    // (menu de pagamento). Sem isso, o extrato mostrava "Juros: R$ 0,00" numa fatura
+    // ainda não vencida, porque monthsLate é 0 antes do vencimento (achado real:
+    // Danilo, contrato #46, em dia, extrato mostrava R$0,00 de juros em vez de R$150).
+    const isRecurring   = !!inv.recurrence && inv.recurrence !== "none";
+    const jurosPeriods  = isRecurring ? Math.max(1, monthsLate) : monthsLate;
+    const jurosDisplay  = jurosMes * jurosPeriods;
     const dueFmt     = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
     msg += `${STATUS_LABEL[inv.status] ?? inv.status} — venc. ${b(dueFmt)}\n`;
     msg += `💰 Principal: ${fmtBRL(principal)}`;
     if (daysLate > 0) msg += `\n📅 ${daysLate} dias em atraso (${monthsLate} ${periodLabel(inv.recurrence, monthsLate)})`;
     if (multa > 0)    msg += `\n⚠️ Multa: ${fmtBRL(multa)}`;
-    if (jurosMes > 0) msg += monthsLate > 1
-      ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${monthsLate} = ${fmtBRL(jurosTotal)}`
-      : `\n📈 Juros: ${fmtBRL(jurosTotal)}`;
+    if (jurosDisplay > 0) msg += jurosPeriods > 1
+      ? `\n📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${jurosPeriods} = ${fmtBRL(jurosDisplay)}`
+      : `\n📈 Juros: ${fmtBRL(jurosDisplay)}`;
     if (inv.notes) msg += `\n📝 ${inv.notes}`;
     msg += `\n💸 Total: ${b(fmtBRL(total))}\n\n`;
   }
