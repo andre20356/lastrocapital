@@ -1,8 +1,8 @@
 import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTable } from "@workspace/db";
 import { eq, and, ilike, ne, or } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { removePendingPayment, sendWA, type WaConfig } from "./whatsappCommands";
-import { monthsLate as calcMonthsLate } from "./invoiceCalculator";
+import { removePendingPayment, savePendingPayment, sendWA, type WaConfig } from "./whatsappCommands";
+import { monthsLate as calcMonthsLate, billableLateDays } from "./invoiceCalculator";
 
 // ── Conversa para /cobranca ───────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ type ConvStep =
   | "qt_client" | "qt_select_client" | "qt_select_invoice" | "qt_type"
   | "cs_select_invoice"
   // ── fluxo do cliente ──
-  | "cl_menu" | "cl_identify" | "cl_identify_multi" | "cl_payment_type" | "cl_await_comprovante";
+  | "cl_menu" | "cl_identify" | "cl_identify_multi" | "cl_select_invoice_payment" | "cl_payment_type" | "cl_await_comprovante";
 
 interface ConvState {
   step: ConvStep;
@@ -54,7 +54,10 @@ interface ConvState {
   cl_clientName?: string;
   cl_totalAmount?: number;
   cl_jurosAmount?: number;
+  cl_paymentType?: "total" | "juros";
   cl_matchedClients?: Array<{ id: number; name: string; document: string | null }>;
+  cl_invoiceId?: number;
+  cl_invoices?: Array<typeof invoicesTable.$inferSelect>;
 }
 
 const conversations = new Map<number, ConvState>();
@@ -515,7 +518,7 @@ async function handleConversationStep(
       const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
       const rate      = parseFloat(inv.interestRate ?? "0") || 0;
       const monthsLateTg = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
-      const multa     = feePerDay * daysLate;
+      const multa     = feePerDay * billableLateDays(daysLate);
       const juros     = (principal * rate) / 100 * (monthsLateTg || 1);
       const companyId = state.qt_clientCompanyId!;
       const clientName = state.qt_clientName ?? "—";
@@ -661,7 +664,7 @@ function buildInvoiceDetail(
   const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
   const rate       = parseFloat(inv.interestRate ?? "0") || 0;
   const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
-  const multa      = feePerDay * daysLate;
+  const multa      = feePerDay * billableLateDays(daysLate);
   const jurosMes   = (principal * rate) / 100;
   const jurosTotal = jurosMes * monthsLate;
   const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -690,11 +693,13 @@ function buildInvoiceDetail(
       msg += `\n\n📊 <b>Detalhamento por período:</b>`;
       for (let m = 1; m <= monthsLate; m++) {
         const daysInPeriod = m < monthsLate ? periodDivisor : daysLate - periodDivisor * (monthsLate - 1);
-        const multaPeriod = feePerDay * daysInPeriod;
+        // Carência de 2 dias só se aplica uma vez, no início do 1º período.
+        const billableDaysInPeriod = m === 1 ? billableLateDays(daysInPeriod) : daysInPeriod;
+        const multaPeriod = feePerDay * billableDaysInPeriod;
         const subtotalPeriod = jurosMes + multaPeriod;
         msg += `\n\n📅 <b>Período ${m}:</b>`;
         if (jurosMes > 0) msg += `\n   💵 Juros: ${fmtBRL(jurosMes)}`;
-        if (multaPeriod > 0) msg += `\n   💸 Multa (${daysInPeriod}d): ${fmtBRL(multaPeriod)}`;
+        if (multaPeriod > 0) msg += `\n   💸 Multa (${billableDaysInPeriod}d): ${fmtBRL(multaPeriod)}`;
         msg += `\n   Subtotal: ${fmtBRL(subtotalPeriod)}`;
       }
       msg += "\n";
@@ -738,7 +743,7 @@ function qtFormatList(
       const principal = parseFloat(inv.amount ?? "0") || 0;
       const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
       const rate      = parseFloat(inv.interestRate ?? "0") || 0;
-      const multa     = feePerDay * daysLate;
+      const multa     = feePerDay * billableLateDays(daysLate);
       const juros     = (principal * rate) / 100;
       const total     = principal + multa + juros;
       const dueFmt    = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
@@ -819,7 +824,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
     const principal  = parseFloat(row.amount  ?? "0") || 0;
     const feePerDay  = parseFloat(row.lateFee ?? "0") || 0;
     const rate       = parseFloat(row.interestRate ?? "0") || 0;
-    const multa      = feePerDay * daysLate;
+    const multa      = feePerDay * billableLateDays(daysLate);
     const monthsLate = calcMonthsLate(row.dueDate, row.recurrence) || 1;
     const jurosMes   = (principal * rate) / 100;
     const jurosTotal = jurosMes * monthsLate;
@@ -837,7 +842,7 @@ async function buildVencidosMessage(companyId?: number, referral?: string): Prom
       `   💰 Principal: ${fmtBRL(principal)}`;
 
     if (jurosMes > 0) entry += `\n   📈 Juros (${rate}%): ${fmtBRL(jurosTotal)}`;
-    if (multa > 0)    entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+    if (multa > 0)    entry += `\n   ⚠️ Multa: ${billableLateDays(daysLate)}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
     if (jurosMes > 0 || multa > 0) entry += `\n   💸 <b>Quitação: ${fmtBRL(total)}</b>`;
     if (row.notes)    entry += `\n   📝 <i>${row.notes}</i>`;
 
@@ -901,6 +906,7 @@ async function buildResumoMessage(companyId?: number): Promise<string> {
       interestRate: invoicesTable.interestRate,
       dueDate:      invoicesTable.dueDate,
       daysLate:     invoicesTable.daysLate,
+      recurrence:   invoicesTable.recurrence,
     })
       .from(invoicesTable)
       .where(companyFilter),
@@ -932,8 +938,9 @@ async function buildResumoMessage(companyId?: number): Promise<string> {
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000))
       : (inv.daysLate ?? 0);
 
-    const multa = feePerDay * daysLate;
-    const juros = (principal * rate) / 100;
+    const multa = billableLateDays(daysLate) * feePerDay;
+    const periods = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
+    const juros = (principal * rate) / 100 * periods;
     const total = principal + juros + multa;
 
     totalCarteira += total;
@@ -1040,7 +1047,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
       const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
       const rate       = parseFloat(inv.interestRate ?? "0") || 0;
       const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
-      const multa      = feePerDay * daysLate;
+      const multa      = feePerDay * billableLateDays(daysLate);
       const jurosMes   = (principal * rate) / 100;
       const jurosTotal = jurosMes * monthsLate;
       const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -1057,7 +1064,7 @@ async function buildClientMessage(name: string, companyId?: number): Promise<str
             ? `\n   📈 Juros: ${fmtBRL(jurosMes)}/mês × ${monthsLate} meses = <b>${fmtBRL(jurosTotal)}</b>`
             : `\n   📈 Juros: ${fmtBRL(jurosTotal)}`;
         }
-        if (multa > 0) entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+        if (multa > 0) entry += `\n   ⚠️ Multa: ${billableLateDays(daysLate)}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
         if (multa > 0 || jurosMes > 0) {
           const encargos = multa + (monthsLate > 0 ? jurosTotal : 0);
           entry += `\n   Subtotal: ${fmtBRL(encargos)}`;
@@ -1144,12 +1151,19 @@ function calcClientTotals(invoices: Array<typeof invoicesTable.$inferSelect>) {
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
     const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
-    const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+    const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const extra = multa + (monthsLate > 0 ? jurosTotal : 0);
     totalAmount += principal + extra;
-    jurosAmount += extra;
+    // Fatura recorrente sempre tem ao menos 1 ciclo de juros pra oferecer como opção
+    // "somente juros", mesmo em dia — é assim que o empréstimo funciona (paga o juros
+    // do mês; o principal só quita quando o cliente escolhe "quitação total" de
+    // propósito). "totalAmount" não muda — quitação continua sendo só o principal (+
+    // atraso, se houver); isso só afeta se a opção "2 — somente juros" é oferecida.
+    const isRecurring = !!inv.recurrence && inv.recurrence !== "none";
+    const jurosPeriods = isRecurring ? Math.max(1, monthsLate) : monthsLate;
+    jurosAmount += multa + jurosMes * jurosPeriods;
   }
   return { totalAmount, jurosAmount };
 }
@@ -1174,7 +1188,7 @@ async function sendClientExtrato(token: string, chatId: number, clientId: number
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
     const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal = parseFloat(inv.amount ?? "0") || 0;
-    const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+    const multa     = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
     const jurosMes  = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -1210,34 +1224,78 @@ async function sendClientPaymentOptions(
   }
 
   const invoices = await db.select().from(invoicesTable)
-    .where(and(eq(invoicesTable.clientId, clientId), ne(invoicesTable.status, "paid")));
+    .where(and(eq(invoicesTable.clientId, clientId), ne(invoicesTable.status, "paid")))
+    .orderBy(invoicesTable.dueDate);
 
   if (invoices.length === 0) {
     await sendTelegram(token, chatId, `✅ <b>${clientName}</b>, você não possui cobranças em aberto!`);
     return;
   }
 
-  const { totalAmount, jurosAmount } = calcClientTotals(invoices);
-  const hasOverdue = invoices.some(i => i.status === "overdue");
+  // Mais de 1 contrato → pede pra escolher qual pagar, em vez de somar tudo num valor
+  // só (sem isso, a confirmação do admin não sabe em qual fatura creditar o pagamento
+  // — achado real: Roberta tinha 2 contratos recorrentes e o juro pago em um deles
+  // acabava creditado no outro por engano; ver nota em wapy_yes).
+  if (invoices.length > 1) {
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    let msg = `💳 <b>Pagamento — ${clientName}</b>\n\nVocê tem <b>${invoices.length}</b> contratos em aberto.\nEscolha qual deseja quitar:\n\n`;
+    invoices.forEach((inv, i) => {
+      const { totalAmount: invTotal } = calcClientTotals([inv]);
+      const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
+      const dueFmt = due ? due.toLocaleDateString("pt-BR", { timeZone: "UTC" }) : "—";
+      const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
+      msg += `<b>${i + 1}</b>. Contrato #${inv.id} — ${statusLabel}\n   📅 Venc: ${dueFmt} | 💸 ${fmtBRL(invTotal)}\n\n`;
+    });
+    msg += `<i>Digite o número (1, 2, 3...) do contrato que deseja pagar.</i>`;
+    await sendTelegram(token, chatId, msg);
+    conversations.set(chatId, {
+      step: "cl_select_invoice_payment",
+      isClientFlow: true,
+      companyIdFilter: companyId,
+      cl_clientId: clientId,
+      cl_clientName: clientName,
+      cl_invoices: invoices,
+    });
+    return;
+  }
 
-  let msg = `💳 <b>Pagamento — ${clientName}</b>\n\n`;
-  msg += `💸 Valor total em aberto: <b>${fmtBRL(totalAmount)}</b>\n`;
-  if (hasOverdue && jurosAmount > 0) {
-    msg += `📈 Somente juros + multas: <b>${fmtBRL(jurosAmount)}</b>\n`;
+  await sendClientPaymentForInvoice(token, chatId, invoices[0], clientName, companyId, company);
+}
+
+async function sendClientPaymentForInvoice(
+  token: string, chatId: number,
+  inv: typeof invoicesTable.$inferSelect, clientName: string, companyId: number,
+  company: { pixKey: string | null; pixKeyType: string | null; pixRecipientName: string | null; pixBankName: string | null },
+): Promise<void> {
+  const { totalAmount, jurosAmount } = calcClientTotals([inv]);
+  const hasOverdue = inv.status === "overdue";
+
+  let msg = `💳 <b>Pagamento — ${clientName}</b>\n`;
+  msg += `📋 Contrato #${inv.id}\n\n`;
+  msg += `💸 Valor total: <b>${fmtBRL(totalAmount)}</b>\n`;
+  // Oferece a escolha sempre que houver juros a cobrar, vencida ou não — fatura
+  // recorrente em dia também tem o juros do ciclo como opção válida (é o modelo do
+  // empréstimo). Antes só oferecia quando já vencida, então uma fatura em dia ia
+  // direto pro "pague o total" sem alternativa.
+  if (jurosAmount > 0) {
+    const jurosLabel = hasOverdue ? "Somente juros + multas" : "Somente juros do mês";
+    msg += `📈 ${jurosLabel}: <b>${fmtBRL(jurosAmount)}</b>\n`;
     msg += `\nComo deseja efetuar o pagamento?\n\n`;
     msg += `<b>1</b> — Quitar valor total (${fmtBRL(totalAmount)})\n`;
-    msg += `<b>2</b> — Pagar somente juros + taxas de atraso (${fmtBRL(jurosAmount)})\n\n`;
+    msg += `<b>2</b> — Pagar ${hasOverdue ? "somente juros + taxas de atraso" : "somente o juros do mês"} (${fmtBRL(jurosAmount)})\n\n`;
     msg += `<i>Responda com 1 ou 2.</i>`;
 
     conversations.set(chatId, {
       step: "cl_payment_type",
       isClientFlow: true,
       companyIdFilter: companyId,
-      cl_clientId: clientId,
+      cl_clientId: inv.clientId,
       cl_clientName: clientName,
       cl_totalAmount: totalAmount,
       cl_jurosAmount: jurosAmount,
+      cl_invoiceId: inv.id,
     });
+    await sendTelegram(token, chatId, msg);
   } else {
     msg += showPixDetails(company, totalAmount);
     msg += `\n\nApós realizar o pagamento, envie o comprovante aqui (foto ou PDF). 📎`;
@@ -1246,12 +1304,12 @@ async function sendClientPaymentOptions(
       step: "cl_await_comprovante",
       isClientFlow: true,
       companyIdFilter: companyId,
-      cl_clientId: clientId,
+      cl_clientId: inv.clientId,
       cl_clientName: clientName,
+      cl_totalAmount: totalAmount,
+      cl_invoiceId: inv.id,
     });
-    return;
   }
-  await sendTelegram(token, chatId, msg);
 }
 
 function showPixDetails(
@@ -1375,6 +1433,26 @@ async function handleClientStep(
       break;
     }
 
+    case "cl_select_invoice_payment": {
+      const invs = state.cl_invoices ?? [];
+      const idx = parseInt(input) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= invs.length) {
+        await sendTelegram(token, chatId, `❌ Número inválido. Digite um número entre 1 e ${invs.length}:`);
+        return;
+      }
+      conversations.delete(chatId);
+      const [company] = await db.select({
+        pixKey: companiesTable.pixKey, pixKeyType: companiesTable.pixKeyType,
+        pixRecipientName: companiesTable.pixRecipientName, pixBankName: companiesTable.pixBankName,
+      }).from(companiesTable).where(eq(companiesTable.id, companyId)).limit(1);
+      if (!company?.pixKey) {
+        await sendTelegram(token, chatId, `ℹ️ Chave PIX não configurada. Entre em contato.`);
+        return;
+      }
+      await sendClientPaymentForInvoice(token, chatId, invs[idx], state.cl_clientName ?? "—", companyId, company);
+      break;
+    }
+
     case "cl_payment_type": {
       if (input !== "1" && input !== "2") {
         await sendTelegram(token, chatId, `❌ Digite <b>1</b> para total ou <b>2</b> para juros/multas:`);
@@ -1394,8 +1472,11 @@ async function handleClientStep(
       msg += showPixDetails(company ?? {}, amount);
       msg += `\n\nApós realizar o pagamento, envie o comprovante aqui (foto ou PDF). 📎`;
       await sendTelegram(token, chatId, msg);
-      // Mantém estado esperando comprovante
+      // Mantém estado esperando comprovante — grava o valor e o tipo (total/juros)
+      // efetivamente escolhidos, para o admin-confirm não precisar adivinhar depois.
       state.step = "cl_await_comprovante";
+      state.cl_totalAmount = amount;
+      state.cl_paymentType = input === "1" ? "total" : "juros";
       conversations.set(chatId, state);
       break;
     }
@@ -1452,76 +1533,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
           const cbMsgId  = cbq.message?.message_id as number | undefined;
           await answerCallback(token, cbq.id, "");
 
-          if (cbData.startsWith("pay_yes:") && cbChatId && cbMsgId) {
-            const [, clientIdStr, clientChatId] = cbData.split(":");
-            const clientId = parseInt(clientIdStr, 10);
-
-            // Busca faturas pendentes antes de marcar como pagas
-            const pendingInvoices = await db.select().from(invoicesTable)
-              .where(and(eq(invoicesTable.clientId, clientId), ne(invoicesTable.status, "paid")));
-
-            const [clientRow] = await db.select({ name: clientsTable.name, companyId: clientsTable.companyId })
-              .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-            const clientName = clientRow?.name ?? `Cliente #${clientId}`;
-            const cfCompanyId = companyId ?? clientRow?.companyId;
-
-            for (const inv of pendingInvoices) {
-              // Marca como paga
-              await db.update(invoicesTable).set({ status: "paid" }).where(eq(invoicesTable.id, inv.id));
-
-              const principal = inv.amount != null ? parseFloat(inv.amount) : 0;
-              if (principal > 0 && cfCompanyId) {
-                // Entrada principal no fluxo de caixa
-                await db.insert(cashFlowTable).values({
-                  companyId: cfCompanyId,
-                  type: "income",
-                  amount: String(principal.toFixed(2)),
-                  description: `Quitação via bot — ${clientName} (Cobrança #${inv.id})`,
-                  category: "cobranças",
-                  date: new Date(),
-                });
-              }
-
-              // Juros/multa se estava em atraso
-              if (inv.status === "overdue" && cfCompanyId) {
-                const rate     = parseFloat(inv.interestRate ?? "0") || 0;
-                const feeDay   = parseFloat(inv.lateFee ?? "0") || 0;
-                const days     = inv.daysLate ?? 0;
-                const juros    = (principal * rate) / 100 + feeDay * days;
-                if (juros > 0) {
-                  await db.insert(cashFlowTable).values({
-                    companyId: cfCompanyId,
-                    type: "income",
-                    amount: String(juros.toFixed(2)),
-                    description: `Juros/multa via bot — ${clientName} (Cobrança #${inv.id})`,
-                    category: "juros",
-                    date: new Date(),
-                  });
-                }
-                // Fecha débito em aberto
-                await db.update(debtsTable).set({ status: "closed" })
-                  .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
-              }
-            }
-
-            // Remove botões do admin e mostra confirmação
-            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
-              `✅ <b>Pagamento confirmado!</b>\n${pendingInvoices.length} fatura(s) de <b>${clientName}</b> marcadas como pagas.`);
-            // Notifica o cliente
-            if (clientChatId) {
-              await sendTelegram(token, clientChatId, `✅ <b>Pagamento confirmado!</b>\n\nSeu pagamento foi recebido e confirmado. Obrigado! 😊`);
-            }
-
-          } else if (cbData.startsWith("pay_no:") && cbChatId && cbMsgId) {
-            const [, , clientChatId] = cbData.split(":");
-            await editMsgRemoveButtons(token, cbChatId, cbMsgId,
-              `❌ <b>Pagamento rejeitado.</b>\nCliente foi notificado para entrar em contato.`);
-            if (clientChatId) {
-              await sendTelegram(token, clientChatId,
-                `❌ Houve um problema ao processar seu pagamento.\n\nPor favor, entre em contato com o administrador para verificar o comprovante.`);
-            }
-
-          } else if (cbData.startsWith("wapy_yes:") && cbChatId && cbMsgId) {
+          if (cbData.startsWith("wapy_yes:") && cbChatId && cbMsgId) {
             const payId = cbData.slice("wapy_yes:".length);
             const pending = await removePendingPayment(payId);
 
@@ -1532,14 +1544,26 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
               const valorPago = pending.totalAmount ?? 0;
 
               // Busca faturas em aberto do cliente para fechar apenas as que cabem no valor pago
-              const openInvoices = await db.select().from(invoicesTable)
+              const allOpenInvoices = await db.select().from(invoicesTable)
                 .where(and(eq(invoicesTable.clientId, pending.clientId), ne(invoicesTable.status, "paid")))
                 .orderBy(invoicesTable.dueDate);
+
+              // Quando o cliente escolheu explicitamente qual contrato pagar (fluxo de
+              // pagamento por WhatsApp/Telegram guarda cl_invoiceId de ponta a ponta),
+              // restringe à fatura selecionada em vez de "adivinhar" pela primeira fatura
+              // recorrente da lista — achado real: Roberta (cliente 26) tinha 2 contratos
+              // recorrentes abertos, pagou o juro do #45, mas o sistema creditou no #74
+              // (que vencia antes na ordenação) porque nada aqui sabia qual fatura era.
+              // Sem correspondência (payId antigo, de antes desse campo existir), cai no
+              // comportamento heurístico anterior como fallback.
+              const openInvoices = pending.invoiceId
+                ? allOpenInvoices.filter(inv => inv.id === pending.invoiceId)
+                : allOpenInvoices;
 
               // Primeiro verifica se o valor pago corresponde a juros+multa de uma fatura recorrente
               // (deve rodar ANTES do filtro de principal para evitar falso "Pago")
               let jurosAdvanced = false;
-              if (valorPago > 0) {
+              if (valorPago > 0 && pending.paymentType !== "total") {
                 const todayAdv = new Date(); todayAdv.setUTCHours(0, 0, 0, 0);
                 const todayStr = todayAdv.toISOString().split("T")[0];
                 for (const inv of openInvoices) {
@@ -1554,7 +1578,18 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                   const encargos = fee * dl + (p * rate / 100) * (pd || 1);
                   // Valor deve bater dentro de ±15% dos encargos E ser menor que 80% do principal
                   // (evita confundir pagamento parcial de principal com juros)
-                  if (encargos > 0 && valorPago >= encargos * 0.85 && valorPago <= encargos * 1.15 && valorPago < p * 0.8) {
+                  const encargosMatch = encargos > 0 && valorPago >= encargos * 0.85 && valorPago <= encargos * 1.15 && valorPago < p * 0.8;
+                  // Prioridade: a escolha explícita do cliente no menu (cl_payment_type "somente
+                  // juros") — agora sempre oferecida quando a fatura é recorrente, vencida ou não
+                  // (ver calcClientTotals/calcClientTotalsWA). "encargosMatch" fica só como
+                  // fallback pra pagamentos pendentes antigos sem esse campo. Removido o antigo
+                  // "valor pago ≈ valor de face" como sinal de juros: isso está ERRADO — pagar o
+                  // valor de face de uma fatura recorrente é exatamente o que é uma quitação total
+                  // legítima (caso real: Walisson pagou os R$300 de face da fatura #63 e QUITOU de
+                  // verdade; tratar isso como juros teria sido um erro na direção oposta ao do
+                  // Wesley, que pagou só os R$120 de juros mas o sistema assumiu R$400 de intenção
+                  // porque a fatura ainda não vencida nunca ofereceu a escolha).
+                  if (pending.paymentType === "juros" || encargosMatch) {
                     // Pagamento de juros/multa detectado → avança recorrência
                     await db.update(debtsTable).set({ status: "closed" })
                       .where(and(eq(debtsTable.invoiceId, inv.id), eq(debtsTable.status, "open")));
@@ -1577,9 +1612,15 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                         });
                       }
                     }
+                    // Lança no caixa o juros calculado pela fórmula da própria fatura (taxa ×
+                    // principal), NÃO o valor do pagamento pendente — esse reflete "quanto a
+                    // fatura pede", que numa fatura ainda não vencida é o valor de face inteiro,
+                    // não o juros do ciclo (bug real: Wesley pagou R$120 de juros de uma fatura
+                    // de R$400 e o caixa registrou R$400 — encargos aqui já dá os R$120 certos).
+                    const jurosValue = encargos > 0 ? encargos : valorPago;
                     await db.insert(cashFlowTable).values({
                       companyId: cfCompanyId, type: "income",
-                      amount: String(valorPago.toFixed(2)),
+                      amount: String(jurosValue.toFixed(2)),
                       description: `Juros/multa via WhatsApp — ${pending.clientName} (#${inv.id})`,
                       category: "juros", date: new Date(),
                     });
@@ -1623,13 +1664,19 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
               paidCount = toMark.length + (jurosAdvanced ? 1 : 0);
             }
 
-            const waCfgYes = pending ? (pending.instance
+            // Cliente pode ter vindo do WhatsApp (notifica via sendWA) ou do bot direto no
+            // Telegram (notifica de volta no mesmo chat) — nunca os dois ao mesmo tempo.
+            const viaTelegram = pending?.telegramClientChatId != null;
+            const waCfgYes = !viaTelegram && pending ? (pending.instance
               ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
               : buildWaConfig()) : null;
             await Promise.all([
               editMsgRemoveButtons(token, cbChatId, cbMsgId,
-                `✅ <b>Pagamento confirmado!</b> ${paidCount > 0 ? `${paidCount} fatura(s) de ` : ""}${pending?.clientName ?? "Cliente"} marcadas como pagas e notificado via WhatsApp.`),
-              waCfgYes && pending
+                `✅ <b>Pagamento confirmado!</b> ${paidCount > 0 ? `${paidCount} fatura(s) de ` : ""}${pending?.clientName ?? "Cliente"} marcadas como pagas e notificado.`),
+              viaTelegram
+                ? sendTelegram(token, pending!.telegramClientChatId!,
+                    `✅ <b>Pagamento confirmado!</b>\n\nOlá, ${pending!.clientName}! 😊\n\nSeu pagamento foi recebido e confirmado com sucesso! 🎉\n\nAgradecemos pela sua confiança na Lastro Capital. 💚`)
+                : waCfgYes && pending
                 ? sendWA(waCfgYes, pending.phone,
                     `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n✅ *Pagamento Confirmado!*\n\nOlá, ${pending.clientName}! 😊\n\nSeu pagamento foi recebido e *confirmado com sucesso!* 🎉\n\nAgradecemos pela sua confiança na *Lastro Capital*. 💚\n\nEm caso de dúvidas, estamos à disposição.`)
                 : Promise.resolve(),
@@ -1638,13 +1685,17 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
           } else if (cbData.startsWith("wapy_no:") && cbChatId && cbMsgId) {
             const payId = cbData.slice("wapy_no:".length);
             const pending = await removePendingPayment(payId);
-            const waCfgNo = pending ? (pending.instance
+            const viaTelegram = pending?.telegramClientChatId != null;
+            const waCfgNo = !viaTelegram && pending ? (pending.instance
               ? { ...buildWaConfig()!, instance: pending.instance, companyId: pending.companyId }
               : buildWaConfig()) : null;
             await Promise.all([
               editMsgRemoveButtons(token, cbChatId, cbMsgId,
-                `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado via WhatsApp.`),
-              waCfgNo && pending
+                `❌ <b>Pagamento recusado.</b> ${pending?.clientName ?? "Cliente"} foi notificado.`),
+              viaTelegram
+                ? sendTelegram(token, pending!.telegramClientChatId!,
+                    `⚠️ <b>Atenção</b>\n\nOlá, ${pending!.clientName}!\n\nNão conseguimos identificar o seu pagamento no sistema.\n\nPor favor, entre em contato com nossa administração para verificar e regularizar sua situação.`)
+                : waCfgNo && pending
                 ? sendWA(waCfgNo, pending.phone,
                     `🏦 *LASTRO CAPITAL*\n━━━━━━━━━━━━━━━━━━━━\n\n⚠️ *Atenção*\n\nOlá, ${pending.clientName}!\n\nNão conseguimos identificar o seu pagamento no sistema.\n\nPor favor, entre em contato com nossa *administração* para verificar e regularizar sua situação.\n\nEstamos aqui para te ajudar. 💚`)
                 : Promise.resolve(),
@@ -1674,12 +1725,32 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
             // Encaminha o comprovante ao admin
             await forwardTelegramMessage(token, companyChatId, chatId, update.message.message_id);
 
+            // Usa o mesmo mecanismo de confirmação do WhatsApp (payId persistido em
+            // wa_pending_payments) em vez do antigo "pay_yes:clientId:chatId" — aquele
+            // fluxo não sabia quanto o cliente pagou nem se era quitação ou só juros, e
+            // acabava marcando TODAS as faturas em aberto como pagas ao apertar confirmar.
+            const [clientRow] = clId
+              ? await db.select({ phone: clientsTable.phone }).from(clientsTable).where(eq(clientsTable.id, clId)).limit(1)
+              : [];
+            const payId = `tgpay_${Date.now()}`;
+            await savePendingPayment(payId, {
+              phone: clientRow?.phone ?? "",
+              clientName: clName,
+              clientId: clId,
+              totalAmount: activeMediaConv.cl_totalAmount,
+              paymentType: activeMediaConv.cl_paymentType,
+              instance: buildWaConfig()?.instance ?? "",
+              companyId,
+              telegramClientChatId: chatId,
+              invoiceId: activeMediaConv.cl_invoiceId,
+            });
+
             // Envia botões de confirmação ao admin
             await sendTelegramWithButtons(token, companyChatId,
               `📎 <b>Comprovante recebido</b> de <b>${clName}</b>!\n\nDeseja confirmar o pagamento?`,
               [
-                { text: "✅ Confirmar pagamento", callback_data: `pay_yes:${clId}:${chatId}` },
-                { text: "❌ Rejeitar",            callback_data: `pay_no:${clId}:${chatId}` },
+                { text: "✅ Confirmar pagamento", callback_data: `wapy_yes:${payId}` },
+                { text: "❌ Rejeitar",            callback_data: `wapy_no:${payId}` },
               ]
             );
             continue;
@@ -1877,7 +1948,7 @@ async function pollBot(token: string, companyId: number | undefined, label: stri
                   const feePerDay = parseFloat(inv.lateFee ?? "0") || 0;
                   const daysLate = inv.status === "overdue" && due
                     ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
-                  const multa = feePerDay * daysLate;
+                  const multa = billableLateDays(daysLate) * feePerDay;
                   const statusLabel = STATUS_LABEL[inv.status] ?? inv.status;
                   const numTag = i < NUM_EMOJI.length ? NUM_EMOJI[i] : `${i + 1}.`;
 

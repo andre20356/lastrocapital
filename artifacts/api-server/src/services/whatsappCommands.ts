@@ -1,7 +1,7 @@
 import { db, invoicesTable, clientsTable, companiesTable, debtsTable, cashFlowTable } from "@workspace/db";
 import { eq, and, ilike, ne, or, sql as drizzleSql } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { monthsLate as calcMonthsLate } from "./invoiceCalculator";
+import { monthsLate as calcMonthsLate, billableLateDays } from "./invoiceCalculator";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -44,9 +44,10 @@ interface WaConvState {
   qt_invoiceIdx?: number;
   cl_action?: "contratos" | "extrato" | "pagar";
   cl_clientId?: number; cl_clientName?: string;
-  cl_totalAmount?: number; cl_jurosAmount?: number;
+  cl_totalAmount?: number; cl_jurosAmount?: number; cl_paymentType?: "total" | "juros";
   cl_matchedClients?: Array<{ id: number; name: string; document: string | null }>;
   cl_invoices?: Array<typeof invoicesTable.$inferSelect>;
+  cl_invoiceId?: number;
 }
 
 // Expira conversas paradas há muito tempo — evita que um fluxo abandonado
@@ -178,16 +179,24 @@ export async function saveJidMapping(lidJid: string, inputPhone: string, company
 
 // Pagamentos pendentes aguardando confirmação do admin (via Telegram)
 // Persiste em banco para sobreviver a restarts do container
-export type PendingPayment = { phone: string; clientName: string; clientId?: number; totalAmount?: number; instance: string; companyId?: number };
+// paymentType: quando conhecido (cliente escolheu "1" ou "2" no menu), o admin-confirm
+// usa essa informação diretamente em vez de tentar adivinhar por heurística de valor.
+// telegramClientChatId: preenchido quando o comprovante veio do cliente falando direto
+// com o bot no Telegram — usado para notificar a confirmação de volta lá, em vez de WhatsApp.
+export type PendingPayment = {
+  phone: string; clientName: string; clientId?: number; totalAmount?: number; instance: string; companyId?: number;
+  paymentType?: "total" | "juros"; telegramClientChatId?: number; invoiceId?: number;
+};
 export const pendingWaPayments = new Map<string, PendingPayment>();
 
 export async function savePendingPayment(payId: string, data: PendingPayment): Promise<void> {
   pendingWaPayments.set(payId, data);
   try {
     await db.execute(drizzleSql`
-      INSERT INTO wa_pending_payments (id, phone, client_name, client_id, total_amount, instance, company_id)
+      INSERT INTO wa_pending_payments (id, phone, client_name, client_id, total_amount, instance, company_id, payment_type, telegram_client_chat_id, invoice_id)
       VALUES (${payId}, ${data.phone}, ${data.clientName}, ${data.clientId ?? null},
-              ${data.totalAmount ?? null}, ${data.instance}, ${data.companyId ?? null})
+              ${data.totalAmount ?? null}, ${data.instance}, ${data.companyId ?? null},
+              ${data.paymentType ?? null}, ${data.telegramClientChatId ?? null}, ${data.invoiceId ?? null})
       ON CONFLICT (id) DO NOTHING
     `);
   } catch (e: any) {
@@ -203,6 +212,9 @@ export async function loadPendingPayments(): Promise<void> {
         phone: row.phone, clientName: row.client_name,
         clientId: row.client_id ?? undefined, totalAmount: row.total_amount ? parseFloat(row.total_amount) : undefined,
         instance: row.instance, companyId: row.company_id ?? undefined,
+        paymentType: row.payment_type ?? undefined,
+        telegramClientChatId: row.telegram_client_chat_id ? Number(row.telegram_client_chat_id) : undefined,
+        invoiceId: row.invoice_id ?? undefined,
       });
     }
     logger.info(`[WA] ${pendingWaPayments.size} pagamento(s) pendente(s) carregado(s) do banco`);
@@ -229,24 +241,36 @@ async function notifyAdminTelegramComprovante(payId: string, clientName: string,
     { text: "✅ Confirmar pagamento", callback_data: `wapy_yes:${payId}` },
     { text: "❌ Recusar",             callback_data: `wapy_no:${payId}` },
   ]] };
+  const sendTextFallback = async (reason?: string) => {
+    const text = reason ? `${caption}\n\n⚠️ <i>Não foi possível anexar a imagem (${reason}). Confira o comprovante direto no WhatsApp.</i>` : caption;
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: adminId, text, parse_mode: "HTML", reply_markup: replyMarkup }),
+    });
+    if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+  };
+
   try {
     if (imageBase64) {
-      const form = new FormData();
-      form.append("chat_id", adminId);
-      form.append("caption", caption);
-      form.append("parse_mode", "HTML");
-      form.append("reply_markup", JSON.stringify(replyMarkup));
-      const buffer = Buffer.from(imageBase64, "base64");
-      form.append("photo", new Blob([buffer], { type: "image/jpeg" }), "comprovante.jpg");
-      const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+      try {
+        const form = new FormData();
+        form.append("chat_id", adminId);
+        form.append("caption", caption);
+        form.append("parse_mode", "HTML");
+        form.append("reply_markup", JSON.stringify(replyMarkup));
+        const buffer = Buffer.from(imageBase64, "base64");
+        form.append("photo", new Blob([buffer], { type: "image/jpeg" }), "comprovante.jpg");
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
+        if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+      } catch (photoErr: any) {
+        // Telegram às vezes recusa a imagem (ex.: IMAGE_PROCESS_FAILED) mesmo com o pagamento
+        // já persistido em wa_pending_payments — sem este fallback o admin nunca fica sabendo.
+        logger.warn(`[WA] sendPhoto falhou, caindo para texto: ${photoErr.message}`);
+        await sendTextFallback("erro ao processar a imagem");
+      }
     } else {
-      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: adminId, text: caption, parse_mode: "HTML", reply_markup: replyMarkup }),
-      });
-      if (!res.ok) throw new Error(await res.text().catch(() => String(res.status)));
+      await sendTextFallback();
     }
   } catch (e: any) {
     logger.warn(`[WA] Falha ao notificar Telegram comprovante: ${e.message}`);
@@ -381,7 +405,7 @@ function buildInvoiceDetailWA(
   const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
   const rate       = parseFloat(inv.interestRate ?? "0") || 0;
   const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
-  const multa      = feePerDay * daysLate;
+  const multa      = feePerDay * billableLateDays(daysLate);
   const jurosMes   = (principal * rate) / 100;
   const jurosTotal = jurosMes * monthsLate;
   const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -410,11 +434,13 @@ function buildInvoiceDetailWA(
       msg += `\n\n📊 ${b("Detalhamento por período:")}`;
       for (let m = 1; m <= monthsLate; m++) {
         const daysInPeriod = m < monthsLate ? periodDivisor : daysLate - periodDivisor * (monthsLate - 1);
-        const multaPeriod = feePerDay * daysInPeriod;
+        // Carência de 2 dias só se aplica uma vez, no início do 1º período.
+        const billableDaysInPeriod = m === 1 ? billableLateDays(daysInPeriod) : daysInPeriod;
+        const multaPeriod = feePerDay * billableDaysInPeriod;
         const subtotalPeriod = jurosMes + multaPeriod;
         msg += `\n\n📅 ${b(`Período ${m}:`)}`;
         if (jurosMes > 0) msg += `\n   💵 Juros: ${fmtBRL(jurosMes)}`;
-        if (multaPeriod > 0) msg += `\n   💸 Multa (${daysInPeriod}d): ${fmtBRL(multaPeriod)}`;
+        if (multaPeriod > 0) msg += `\n   💸 Multa (${billableDaysInPeriod}d): ${fmtBRL(multaPeriod)}`;
         msg += `\n   Subtotal: ${fmtBRL(subtotalPeriod)}`;
       }
       msg += "\n";
@@ -483,7 +509,7 @@ async function buildVencidosWA(companyId?: number, referral?: string): Promise<s
     const principal  = parseFloat(row.amount ?? "0") || 0;
     const feePerDay  = parseFloat(row.lateFee ?? "0") || 0;
     const rate       = parseFloat(row.interestRate ?? "0") || 0;
-    const multa      = feePerDay * daysLate;
+    const multa      = feePerDay * billableLateDays(daysLate);
     const monthsLate = calcMonthsLate(row.dueDate, row.recurrence) || 1;
     const jurosMes   = (principal * rate) / 100;
     const jurosTotal = jurosMes * monthsLate;
@@ -502,7 +528,7 @@ async function buildVencidosWA(companyId?: number, referral?: string): Promise<s
       `   💰 Principal: ${fmtBRL(principal)}`;
 
     if (jurosMes > 0) entry += `\n   📈 Juros (${rate}%): ${fmtBRL(jurosTotal)}`;
-    if (multa > 0)    entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+    if (multa > 0)    entry += `\n   ⚠️ Multa: ${billableLateDays(daysLate)}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
     if (jurosMes > 0 || multa > 0) entry += `\n   💸 ${b(`Quitação: ${fmtBRL(total)}`)}`;
     if (row.notes)    entry += `\n   📝 ${it(row.notes)}`;
 
@@ -558,7 +584,7 @@ async function buildClientMessageWA(name: string, companyId?: number): Promise<s
       const feePerDay  = parseFloat(inv.lateFee ?? "0") || 0;
       const rate       = parseFloat(inv.interestRate ?? "0") || 0;
       const monthsLate = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
-      const multa      = feePerDay * daysLate;
+      const multa      = feePerDay * billableLateDays(daysLate);
       const jurosMes   = (principal * rate) / 100;
       const jurosTotal = jurosMes * monthsLate;
       const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -573,7 +599,7 @@ async function buildClientMessageWA(name: string, companyId?: number): Promise<s
             ? `\n   📈 Juros: ${fmtBRL(jurosMes)}/${periodLabel(inv.recurrence, 1)} × ${monthsLate} ${periodLabel(inv.recurrence, monthsLate)} = ${b(fmtBRL(jurosTotal))}`
             : `\n   📈 Juros: ${fmtBRL(jurosTotal)}`;
         }
-        if (multa > 0) entry += `\n   ⚠️ Multa: ${daysLate}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
+        if (multa > 0) entry += `\n   ⚠️ Multa: ${billableLateDays(daysLate)}d × ${fmtBRL(feePerDay)} = ${fmtBRL(multa)}`;
         if (multa > 0 || jurosMes > 0) {
           const encargos = multa + (monthsLate > 0 ? jurosTotal : 0);
           entry += `\n   Subtotal: ${fmtBRL(encargos)}`;
@@ -609,7 +635,8 @@ async function buildResumoWA(companyId?: number): Promise<string> {
   const [allClients, allInvoices] = await Promise.all([
     db.select({ id: clientsTable.id, status: clientsTable.status }).from(clientsTable).where(clientFilter),
     db.select({ status: invoicesTable.status, amount: invoicesTable.amount, lateFee: invoicesTable.lateFee,
-      interestRate: invoicesTable.interestRate, dueDate: invoicesTable.dueDate, daysLate: invoicesTable.daysLate })
+      interestRate: invoicesTable.interestRate, dueDate: invoicesTable.dueDate, daysLate: invoicesTable.daysLate,
+      recurrence: invoicesTable.recurrence })
       .from(invoicesTable).where(companyFilter),
   ]);
 
@@ -624,8 +651,9 @@ async function buildResumoWA(companyId?: number): Promise<string> {
     const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
     const daysLate = inv.status === "overdue" && due
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : (inv.daysLate ?? 0);
-    const multa = feePerDay * daysLate;
-    const juros = (principal * rate) / 100;
+    const multa = billableLateDays(daysLate) * feePerDay;
+    const periods = inv.status === "overdue" ? calcMonthsLate(inv.dueDate, inv.recurrence) : 0;
+    const juros = (principal * rate) / 100 * periods;
     const total = principal + juros + multa;
     totalCarteira += total;
     if (inv.status === "overdue") { totalVencido += total; totalMultas += multa + juros; countVencido++; }
@@ -713,12 +741,19 @@ function calcClientTotalsWA(invoices: Array<typeof invoicesTable.$inferSelect>) 
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
     const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal  = parseFloat(inv.amount ?? "0") || 0;
-    const multa      = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+    const multa      = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
     const jurosMes   = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const extra = multa + (monthsLate > 0 ? jurosTotal : 0);
     totalAmount += principal + extra;
-    jurosAmount += extra;
+    // Fatura recorrente sempre tem ao menos 1 ciclo de juros pra oferecer como opção
+    // "somente juros", mesmo em dia — é assim que o empréstimo funciona (paga o juros
+    // do mês; o principal só quita quando o cliente escolhe "quitação total" de
+    // propósito). "totalAmount" não muda — quitação continua sendo só o principal (+
+    // atraso, se houver); isso só afeta se a opção "2 — somente juros" é oferecida.
+    const isRecurring = !!inv.recurrence && inv.recurrence !== "none";
+    const jurosPeriods = isRecurring ? Math.max(1, monthsLate) : monthsLate;
+    jurosAmount += multa + jurosMes * jurosPeriods;
   }
   return { totalAmount, jurosAmount };
 }
@@ -765,7 +800,7 @@ async function sendClientExtratoWA(cfg: WaConfig, phone: string, clientId: numbe
       ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
     const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
     const principal  = parseFloat(inv.amount ?? "0") || 0;
-    const multa      = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+    const multa      = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
     const jurosMes   = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100;
     const jurosTotal = jurosMes * monthsLate;
     const total      = principal + multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -815,7 +850,7 @@ async function sendClientPaymentWA(cfg: WaConfig, phone: string, clientId: numbe
       const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
       const daysLate = inv.status === "overdue" && due ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
       const principal = parseFloat(inv.amount ?? "0") || 0;
-      const multa = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+      const multa = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
       const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
       const juros = (principal * (parseFloat(inv.interestRate ?? "0") || 0)) / 100 * monthsLate;
       const total = principal + multa + (monthsLate > 0 ? juros : 0);
@@ -857,19 +892,25 @@ async function sendPixInfoWA(
   msg += `🔑 Chave PIX (${pixTypeLabel[company.pixKeyType ?? ""] ?? "PIX"}): ${b(company.pixKey ?? "")}\n`;
   msg += `💸 Valor: ${b(fmtBRL(totalAmount))}`;
 
-  if (hasOverdue && jurosAmount > 0) {
-    msg += `\n\n📈 Juros + multas acumulados: ${b(fmtBRL(jurosAmount))}`;
-    msg += `\n\nComo deseja efetuar o pagamento?\n${b("1")} — Quitar total (${fmtBRL(totalAmount)})\n${b("2")} — Pagar somente juros + multas (${fmtBRL(jurosAmount)})\n0️⃣ — Voltar ao menu\n\n${it("Responda com 1, 2 ou 0.")}`;
+  // Oferece a escolha "quitação total vs. somente juros" sempre que houver juros a
+  // cobrar, vencida ou não — fatura recorrente em dia também tem o juros do ciclo
+  // como opção válida (é o modelo do empréstimo). Antes só oferecia quando já vencida,
+  // então uma fatura em dia ia direto pro "pague o total" sem alternativa, e se o
+  // cliente pagasse só o juros mesmo assim, o sistema não tinha como saber.
+  if (jurosAmount > 0) {
+    const jurosLabel = hasOverdue ? "Juros + multas acumulados" : "Somente juros do mês";
+    msg += `\n\n📈 ${jurosLabel}: ${b(fmtBRL(jurosAmount))}`;
+    msg += `\n\nComo deseja efetuar o pagamento?\n${b("1")} — Quitar total (${fmtBRL(totalAmount)})\n${b("2")} — Pagar ${hasOverdue ? "somente juros + multas" : "somente o juros do mês"} (${fmtBRL(jurosAmount)})\n0️⃣ — Voltar ao menu\n\n${it("Responda com 1, 2 ou 0.")}`;
     waConversations.set(convKey, {
       step: "cl_payment_type", isClientFlow: true, companyIdFilter: companyId,
       cl_clientId: inv.clientId, cl_clientName: clientName,
-      cl_totalAmount: totalAmount, cl_jurosAmount: jurosAmount,
+      cl_totalAmount: totalAmount, cl_jurosAmount: jurosAmount, cl_invoiceId: inv.id,
     });
   } else {
     msg += `\n\nApós realizar o pagamento, envie o comprovante aqui. 📎\n\n0️⃣ — Voltar ao menu`;
     waConversations.set(convKey, {
       step: "cl_await_comprovante", isClientFlow: true, companyIdFilter: companyId,
-      cl_clientId: inv.clientId, cl_clientName: clientName, cl_totalAmount: totalAmount,
+      cl_clientId: inv.clientId, cl_clientName: clientName, cl_totalAmount: totalAmount, cl_invoiceId: inv.id,
     });
   }
   await sendWA(cfg, phone, msg);
@@ -1081,7 +1122,11 @@ async function handleClientStepWA(
       msg += `\nApós realizar o pagamento, envie o comprovante aqui. 📎`;
 
       await sendWA(cfg, phone, msg);
-      waConversations.set(convKey, { step: "cl_await_comprovante", isClientFlow: true, companyIdFilter: companyId, cl_clientId: state.cl_clientId, cl_clientName: state.cl_clientName, cl_totalAmount: total });
+      waConversations.set(convKey, {
+        step: "cl_await_comprovante", isClientFlow: true, companyIdFilter: companyId,
+        cl_clientId: state.cl_clientId, cl_clientName: state.cl_clientName, cl_totalAmount: total,
+        cl_paymentType: input === "1" ? "total" : "juros", cl_invoiceId: state.cl_invoiceId,
+      });
       break;
     }
 
@@ -1326,7 +1371,7 @@ async function handleConvStepWA(cfg: WaConfig, phone: string, text: string, stat
         const due = inv.dueDate ? new Date(inv.dueDate + "T00:00:00Z") : null;
         const daysLate = inv.status === "overdue" && due ? Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000)) : 0;
         const monthsLate = calcMonthsLate(inv.dueDate, inv.recurrence);
-        const multa = (parseFloat(inv.lateFee ?? "0") || 0) * daysLate;
+        const multa = (parseFloat(inv.lateFee ?? "0") || 0) * billableLateDays(daysLate);
         const jurosMes = principal * (parseFloat(inv.interestRate ?? "0") || 0) / 100;
         const jurosTotal = jurosMes * monthsLate;
         const extra = multa + (monthsLate > 0 ? jurosTotal : 0);
@@ -1589,7 +1634,7 @@ export async function handleWhatsAppWebhook(cfg: WaConfig, payload: any): Promis
         waConversations.delete(mediaKey);
         await sendWA(cfg, sendPhone, `✅ Comprovante recebido!\n\nSeu pagamento está sendo processado. Em breve você receberá a confirmação. 🙏`);
         const payId = `wapay_${Date.now()}`;
-        await savePendingPayment(payId, { phone: sendPhone, clientName: clName, clientId: activeConv.cl_clientId, totalAmount: activeConv.cl_totalAmount, instance: cfg.instance, companyId: cfg.companyId });
+        await savePendingPayment(payId, { phone: sendPhone, clientName: clName, clientId: activeConv.cl_clientId, totalAmount: activeConv.cl_totalAmount, instance: cfg.instance, companyId: cfg.companyId, paymentType: activeConv.cl_paymentType, invoiceId: activeConv.cl_invoiceId });
         const imageBase64 = data.message?.base64 as string | undefined;
         await notifyAdminTelegramComprovante(payId, clName, sendPhone, imageBase64);
       } else {
