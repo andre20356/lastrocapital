@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ShieldAlert, CheckCircle2, XCircle, CircleCheck, Landmark, Clock, CalendarDays, FileText, Users } from "lucide-react";
-import { formatCurrency, monthsLate } from "@/lib/format";
+import { formatCurrency, monthsLate, billableLateDays } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
 const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
@@ -97,7 +97,7 @@ export default function Debts() {
   const openDebts  = debts?.filter((d) => d.status === "open") ?? [];
   const closedDebts = debts?.filter((d) => d.status === "closed") ?? [];
   const totalOpen  = openDebts.reduce((s, d) => {
-    const multa = (d.invoiceLateFee ?? 0) * (d.daysOverdue ?? 0);
+    const multa = (d.invoiceLateFee ?? 0) * billableLateDays(d.daysOverdue ?? 0);
     return s + (d.invoiceAmount ?? 0) + multa;
   }, 0);
   const totalClosed = closedDebts.reduce((s, d) => s + (d.invoiceAmount ?? 0), 0);
@@ -287,7 +287,8 @@ export default function Debts() {
                         {debt.invoiceAmount != null ? (
                           <div>
                             {(() => {
-                              const multa = (debt.invoiceLateFee ?? 0) * (debt.daysOverdue ?? 0);
+                              const billableDays = billableLateDays(debt.daysOverdue ?? 0);
+                              const multa = (debt.invoiceLateFee ?? 0) * billableDays;
                               const total = debt.invoiceAmount + multa;
                               if (debt.status === "open" && multa > 0) {
                                 return (
@@ -296,7 +297,7 @@ export default function Debts() {
                                     <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
                                       <div>Principal: {formatCurrency(debt.invoiceAmount)}</div>
                                       <div className="text-destructive/80">
-                                        Multa: {debt.daysOverdue}d × {formatCurrency(debt.invoiceLateFee)} = {formatCurrency(multa)}
+                                        Multa: {billableDays}d × {formatCurrency(debt.invoiceLateFee)} = {formatCurrency(multa)}
                                       </div>
                                     </div>
                                   </div>

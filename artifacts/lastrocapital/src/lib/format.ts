@@ -36,3 +36,10 @@ export function monthsLate(
   const monthDiff = (now.getUTCFullYear() - due.getUTCFullYear()) * 12 + (now.getUTCMonth() - due.getUTCMonth());
   return now.getUTCDate() >= due.getUTCDate() ? monthDiff + 1 : monthDiff;
 }
+
+// Carência: multa só começa a contar a partir do 3º dia de atraso (2 dias de
+// tolerância). Espelha billableLateDays do backend (invoiceCalculator.ts).
+export const GRACE_DAYS = 2;
+export function billableLateDays(daysLate: number): number {
+  return Math.max(0, daysLate - GRACE_DAYS);
+}

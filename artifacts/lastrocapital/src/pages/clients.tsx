@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "@/hooks/use-toast";
-import { monthsLate } from "@/lib/format";
+import { monthsLate, billableLateDays } from "@/lib/format";
 import { formatCurrency } from "@/lib/format";
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -195,7 +195,7 @@ export default function Clients() {
     const mesesL = monthsLate(inv.dueDate, inv.recurrence);
     acc[cid].principal += inv.amount ?? 0;
     acc[cid].interest += (((inv.amount ?? 0) * (inv.interestRate ?? 0)) / 100) * mesesL;
-    acc[cid].lateFees += (inv.lateFee ?? 0) * daysL;
+    acc[cid].lateFees += (inv.lateFee ?? 0) * billableLateDays(daysL);
     return acc;
   }, {});
 

@@ -24,7 +24,7 @@ import {
   Banknote, Calculator, BadgeCheck, Pencil, ClipboardList,
   Clock, XCircle, CircleCheck, ChevronDown, ChevronRight, Search, CalendarX2,
 } from "lucide-react";
-import { formatCurrency, formatDate, monthsLate } from "@/lib/format";
+import { formatCurrency, formatDate, monthsLate, billableLateDays } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { getGetDashboardSummaryQueryKey, getListCashFlowQueryKey } from "@workspace/api-client-react";
 
@@ -726,6 +726,7 @@ export default function Invoices() {
                     const hasCharges = hasInterest || (inv.lateFee ?? 0) > 0;
                     const isOverdueWithFees = isOverdue && hasCharges;
                     const daysLateCalc = inv.daysLate ?? 0;
+                    const billableDaysLate = billableLateDays(daysLateCalc);
                     const monthsLateCalc = monthsLate(inv.dueDate, inv.recurrence);
                     // Fatura recorrente sempre tem ao menos 1 ciclo de juros a exibir, mesmo em
                     // dia (o cliente pode querer adiantar) — monthsLateCalc é 0 antes do
@@ -735,7 +736,7 @@ export default function Invoices() {
                     const isRecurringInv = !!inv.recurrence;
                     const interestPeriods = isRecurringInv ? Math.max(1, monthsLateCalc) : monthsLateCalc;
                     const interestAmt = inv.amount && inv.interestRate ? (inv.amount * inv.interestRate / 100) * interestPeriods : 0;
-                    const lateFeeTotal = (inv.lateFee ?? 0) * daysLateCalc;
+                    const lateFeeTotal = (inv.lateFee ?? 0) * billableDaysLate;
                     const alreadyPaidInterest = inv.interestPaid === true;
                     const cfg = STATUS_CONFIG[inv.status as InvoiceStatus];
                     const StatusIcon = cfg?.icon ?? FileText;
@@ -778,7 +779,7 @@ export default function Invoices() {
                                     <div>Juros {inv.interestRate}%/{inv.recurrence === "daily" ? "dia" : inv.recurrence === "weekly" ? "sem." : inv.recurrence === "biweekly" ? "qzn." : "mês"} × {monthsLateCalc} {inv.recurrence === "daily" ? (monthsLateCalc > 1 ? "dias" : "dia") : inv.recurrence === "weekly" ? (monthsLateCalc > 1 ? "sems." : "sem.") : inv.recurrence === "biweekly" ? (monthsLateCalc > 1 ? "qzns." : "qzn.") : (monthsLateCalc > 1 ? "meses" : "mês")} = {formatCurrency(interestAmt)}</div>
                                   )}
                                   {(inv.lateFee ?? 0) > 0 && (inv.daysLate ?? 0) > 0 && (
-                                    <div>Multa {inv.daysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
+                                    <div>Multa {billableDaysLate}d × {formatCurrency(inv.lateFee)} = {formatCurrency(lateFeeTotal)}</div>
                                   )}
                                 </div>
                               </div>
