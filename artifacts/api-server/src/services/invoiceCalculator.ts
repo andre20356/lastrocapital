@@ -11,6 +11,15 @@ export interface InvoiceLike {
 
 const PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14 };
 
+// Carência: multa só começa a contar a partir do 3º dia de atraso (2 dias de
+// tolerância). Regra de negócio real, confirmada — precisa valer em todo
+// lugar que calcula multa (painel, mensagem de cobrança, extrato do
+// cliente), não só na mensagem de WhatsApp onde já existia antes.
+export const GRACE_DAYS = 2;
+export function billableLateDays(daysLate: number): number {
+  return Math.max(0, daysLate - GRACE_DAYS);
+}
+
 // Conta quantos vencimentos já ocorreram até hoje (contando o vencimento
 // original como o 1º) — não dias-em-atraso ÷ 30. Essa aproximação de 30 dias
 // subestimava em até 1 mês inteiro qualquer contrato que vence depois do dia
@@ -86,7 +95,7 @@ export function calculateInvoiceBreakdown(invoice: InvoiceLike): InvoiceBreakdow
 
   const periods = monthsLate(invoice.dueDate, invoice.recurrence);
   const interestAmount = ((principal * rate) / 100) * periods;
-  const lateFeeTotal = feePerDay * days;
+  const lateFeeTotal = feePerDay * billableLateDays(days);
   const total = principal + interestAmount + lateFeeTotal;
 
   return { principal, interestAmount, lateFeeTotal, total };
@@ -105,7 +114,7 @@ export function calculateInterestOnly(invoice: InvoiceLike): number {
   const feePerDay = parseFloat(invoice.lateFee ?? "0") || 0;
   const days = invoice.daysLate ?? 0;
   const periods = monthsLate(invoice.dueDate, invoice.recurrence);
-  return ((principal * rate) / 100) * periods + feePerDay * days;
+  return ((principal * rate) / 100) * periods + feePerDay * billableLateDays(days);
 }
 
 export interface EmprestimoSemanal {

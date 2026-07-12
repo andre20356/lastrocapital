@@ -64,21 +64,21 @@ export async function montarEEnviarAlertaAtraso(
   let grandTotal = 0;
 
   const contractLines = overdue.map((inv, i) => {
-    // Sempre calcula os dias reais pela data de vencimento vs hoje
-    // Taxa de atraso só começa após 2 dias de carência
-    const GRACE_DAYS = 2;
+    // Dias reais pela data de vencimento vs hoje — a carência de 2 dias antes
+    // da multa começar a contar é aplicada dentro de calculateInvoiceBreakdown
+    // (billableLateDays), não aqui, pra ficar centralizada e valer igual no
+    // painel, no extrato do cliente e em toda mensagem de cobrança.
     const totalDays = (() => {
       if (!inv.dueDate) return 0;
       const due = new Date(inv.dueDate + "T00:00:00-03:00"); // fuso Brasil
       return Math.max(0, Math.floor((Date.now() - due.getTime()) / 86_400_000));
     })();
-    const realDays = Math.max(0, totalDays - GRACE_DAYS);
 
     // status: "overdue" força o cálculo de juros/multa mesmo quando a fatura
     // ainda está marcada "current" no banco — já confirmamos pela data que
     // está vencida de verdade, calculateInvoiceBreakdown só aplica encargos
     // se o status literal for "overdue".
-    const breakdown = calculateInvoiceBreakdown({ ...inv, status: "overdue", daysLate: realDays });
+    const breakdown = calculateInvoiceBreakdown({ ...inv, status: "overdue", daysLate: totalDays });
     if (!breakdown) return null;
 
     const { principal, interestAmount, lateFeeTotal, total } = breakdown;
